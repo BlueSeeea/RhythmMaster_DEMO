@@ -7,21 +7,20 @@
   
   # 设置发布目录
   publish = "dist"
-  
+
+# 定义构建环境变量
+[build.environment]
   # 设置Node.js版本
-  environment = { NODE_VERSION = "16" }
+  NODE_VERSION = "16"
+  # 其他环境变量
+  VITE_APP_NAME = "Rhythm Master"
+  VITE_APP_VERSION = "1.0.0"
 
 # 重定向规则，用于单页应用路由
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
-
-# 定义构建环境变量
-[build.environment]
-  # 可在此添加需要的环境变量
-  VITE_APP_NAME = "Rhythm Master"
-  VITE_APP_VERSION = "1.0.0"
 
 # 优化设置
 [build.processing]
