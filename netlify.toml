@@ -11,7 +11,7 @@
 # 定义构建环境变量
 [build.environment]
   # 设置Node.js版本
-  NODE_VERSION = "16"
+  NODE_VERSION = "18.19.0"
   # 其他环境变量
   VITE_APP_NAME = "Rhythm Master"
   VITE_APP_VERSION = "1.0.0"
