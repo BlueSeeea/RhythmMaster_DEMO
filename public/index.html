@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rhythm Master - 节奏大师</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #1a1a2e;
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+    }
+    .container {
+      max-width: 800px;
+      padding: 2rem;
+    }
+    h1 {
+      font-size: 3rem;
+      margin-bottom: 1rem;
+      background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p {
+      font-size: 1.2rem;
+      margin-bottom: 2rem;
+      opacity: 0.8;
+    }
+    .button {
+      display: inline-block;
+      padding: 1rem 2rem;
+      background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+      color: white;
+      border: none;
+      border-radius: 50px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.3s ease;
+    }
+    .button:hover {
+      transform: scale(1.05);
+    }
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.5rem;
+      margin-top: 3rem;
+    }
+    .feature {
+      background-color: rgba(255, 255, 255, 0.05);
+      padding: 1.5rem;
+      border-radius: 10px;
+      transition: transform 0.3s ease;
+    }
+    .feature:hover {
+      transform: translateY(-5px);
+    }
+    .feature h3 {
+      margin-top: 0;
+      color: #4ecdc4;
+    }
+    footer {
+      margin-top: 4rem;
+      opacity: 0.6;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Rhythm Master</h1>
+    <p>一个令人上瘾的节奏游戏，让你随着音乐节拍舞动指尖！</p>
+    <a href="#" class="button">开始游戏</a>
+    
+    <div class="features">
+      <div class="feature">
+        <h3>🎵 多首歌曲</h3>
+        <p>不同风格和难度的音乐曲目</p>
+      </div>
+      <div class="feature">
+        <h3>🎮 简单操作</h3>
+        <p>键盘或触摸屏轻松操作</p>
+      </div>
+      <div class="feature">
+        <h3>🔥 连击系统</h3>
+        <p>挑战你的反应速度和节奏感</p>
+      </div>
+      <div class="feature">
+        <h3>🎨 精美界面</h3>
+        <p>现代、流畅的视觉体验</p>
+      </div>
+    </div>
+    
+    <footer>
+      <p>&copy; 2023 Rhythm Master. 所有权利保留。</p>
+    </footer>
+  </div>
+</body>
+</html>
