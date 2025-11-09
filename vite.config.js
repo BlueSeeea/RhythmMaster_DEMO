@@ -11,9 +11,7 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['firebase']
-        }
+        manualChunks: {}
       }
     }
   },

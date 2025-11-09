@@ -218,7 +218,7 @@
           <span class="slider-value">{settings.speed}</span>
         </div>
         <div class="setting-item slider">
-          <label class="setting-label">音符大小<label/
+          <label class="setting-label">音符大小</label>
           <input 
             type="range" 
             min="10" 
@@ -230,7 +230,7 @@
           <span class="slider-value">{settings.noteRadius}</span>
         </div>
         <div class="setting-item select">
-          <label class="setting-label">轨道数量<label/
+          <label class="setting-label">轨道数量</label>
           <select 
             value={settings.laneCount} 
             on:change={(e) => updateSetting('laneCount', parseInt(e.target.value))}
@@ -280,13 +280,15 @@
       </div>
     </section>
     
-    <!-- 重置设置 --<section class="settings-section">
+    <!-- 重置设置 -->
+    <section class="settings-section">
       <button class="reset-button" on:click={resetSettings}>
         🔄 重置所有设置
       </button>
     </section>
     
-    <!-- 关于信息 --<section class="settings-section about">
+    <!-- 关于信息 -->
+    <section class="settings-section about">
       <h2 class="section-title">📖 关于游戏</h2>
       <div class="about-info">
         <p>节奏大师 (Rhythm Master) v1.0.0</p>
