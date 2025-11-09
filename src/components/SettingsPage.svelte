@@ -206,7 +206,7 @@
       <h2 class="section-title">🎮 游戏设置</h2>
       <div class="settings-group">
         <div class="setting-item slider">
-          <label class="setting-label">游戏速度 (音符下落速度)<label/
+          <label class="setting-label">游戏速度 (音符下落速度)</label>
           <input 
             type="range" 
             min="5" 
