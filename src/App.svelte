@@ -14,7 +14,7 @@
   let gameResults = null;
   // audioManager已从模块导入，不需要再次声明
   
-  // 游戏配置
+  // 游戏配置 - 轨道数量固定为4条
   let gameConfig = {
     laneCount: 4,
     speed: 10,
@@ -42,6 +42,8 @@
       try {
         const parsed = JSON.parse(savedConfig);
         gameConfig = { ...gameConfig, ...parsed };
+        // 强制设置轨道数量为4条
+        gameConfig.laneCount = 4;
       } catch (e) {
         console.error('加载配置失败:', e);
       }
@@ -83,7 +85,8 @@
   
   // 更新游戏配置
   function updateGameConfig(newConfig) {
-    gameConfig = { ...gameConfig, ...newConfig };
+    // 创建新配置，但强制设置轨道数量为4条
+    gameConfig = { ...gameConfig, ...newConfig, laneCount: 4 };
     localStorage.setItem('rhythmMasterConfig', JSON.stringify(gameConfig));
     
     // 更新音频设置

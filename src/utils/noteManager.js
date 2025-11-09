@@ -61,24 +61,24 @@ class NoteManager {
     
     switch (this.difficulty) {
       case 'easy':
-        this.noteSpeed = gameSettings.noteSpeed || 80;
-        this.noteSpawnRate = 0.3;
+        this.noteSpeed = gameSettings.noteSpeed || 60; // 降低速度
+        this.noteSpawnRate = 0.2; // 降低生成率
         this.trackCount = gameSettings.trackCount || 3;
         break;
       case 'normal':
-        this.noteSpeed = gameSettings.noteSpeed || 100;
-        this.noteSpawnRate = 0.5;
+        this.noteSpeed = gameSettings.noteSpeed || 80; // 降低速度
+        this.noteSpawnRate = 0.35; // 降低生成率
         this.trackCount = gameSettings.trackCount || 4;
         break;
       case 'hard':
-        this.noteSpeed = gameSettings.noteSpeed || 120;
-        this.noteSpawnRate = 0.7;
-        this.trackCount = gameSettings.trackCount || 5;
+        this.noteSpeed = gameSettings.noteSpeed || 100; // 降低速度
+        this.noteSpawnRate = 0.5; // 降低生成率
+        this.trackCount = gameSettings.trackCount || 4; // 减少轨道数量
         break;
       case 'expert':
-        this.noteSpeed = gameSettings.noteSpeed || 150;
-        this.noteSpawnRate = 0.9;
-        this.trackCount = gameSettings.trackCount || 6;
+        this.noteSpeed = gameSettings.noteSpeed || 120; // 降低速度
+        this.noteSpawnRate = 0.7; // 降低生成率
+        this.trackCount = gameSettings.trackCount || 5; // 减少轨道数量
         break;
       default:
         break;

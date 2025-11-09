@@ -133,7 +133,7 @@
         config = {
           speed: 15,
           noteRadius: 15,
-          laneCount: 6
+          laneCount: 4
         };
         break;
     }
@@ -154,50 +154,54 @@
     <section class="settings-section">
       <h2 class="section-title">🔊 音频设置</h2>
       <div class="settings-group">
-        <div class="setting-item">
-          <label class="setting-label">
+          <div class="setting-item">
+            <label class="setting-label" for="audioEnabled">
+              <input 
+                type="checkbox" 
+                id="audioEnabled"
+                checked={settings.audioEnabled} 
+                on:change={(e) => updateSetting('audioEnabled', e.target.checked)}
+              />
+              背景音乐
+            </label>
+          </div>
+          <div class="setting-item">
+            <label class="setting-label" for="sfxEnabled">
+              <input 
+                type="checkbox" 
+                id="sfxEnabled"
+                checked={settings.sfxEnabled} 
+                on:change={(e) => updateSetting('sfxEnabled', e.target.checked)}
+              />
+              音效
+            </label>
+          </div>
+          <div class="setting-item slider">
+            <label class="setting-label" for="audioVolume">背景音乐音量</label>
             <input 
-              type="checkbox" 
-              checked={settings.audioEnabled} 
-              on:change={(e) => updateSetting('audioEnabled', e.target.checked)}
+              type="range" 
+              min="0" 
+              max="1" 
+              step="0.05" 
+              value={settings.audioVolume} 
+              on:input={(e) => updateSetting('audioVolume', parseFloat(e.target.value))}
+              id="audioVolume"
             />
-            背景音乐
-          </label>
-        </div>
-        <div class="setting-item">
-          <label class="setting-label">
+            <span class="slider-value">{Math.round(settings.audioVolume * 100)}%</span>
+          </div>
+          <div class="setting-item slider">
+            <label class="setting-label" for="sfxVolume">音效音量</label>
             <input 
-              type="checkbox" 
-              checked={settings.sfxEnabled} 
-              on:change={(e) => updateSetting('sfxEnabled', e.target.checked)}
+              type="range" 
+              min="0" 
+              max="1" 
+              step="0.05" 
+              value={settings.sfxVolume} 
+              on:input={(e) => updateSetting('sfxVolume', parseFloat(e.target.value))}
+              id="sfxVolume"
             />
-            音效
-          </label>
-        </div>
-        <div class="setting-item slider">
-          <label class="setting-label">背景音乐音量</label>
-          <input 
-            type="range" 
-            min="0" 
-            max="1" 
-            step="0.05" 
-            value={settings.audioVolume} 
-            on:input={(e) => updateSetting('audioVolume', parseFloat(e.target.value))}
-          />
-          <span class="slider-value">{Math.round(settings.audioVolume * 100)}%</span>
-        </div>
-        <div class="setting-item slider">
-          <label class="setting-label">音效音量</label>
-          <input 
-            type="range" 
-            min="0" 
-            max="1" 
-            step="0.05" 
-            value={settings.sfxVolume} 
-            on:input={(e) => updateSetting('sfxVolume', parseFloat(e.target.value))}
-          />
-          <span class="slider-value">{Math.round(settings.sfxVolume * 100)}%</span>
-        </div>
+            <span class="slider-value">{Math.round(settings.sfxVolume * 100)}%</span>
+          </div>
       </div>
     </section>
     
@@ -205,60 +209,66 @@
     <section class="settings-section">
       <h2 class="section-title">🎮 游戏设置</h2>
       <div class="settings-group">
-        <div class="setting-item slider">
-          <label class="setting-label">游戏速度 (音符下落速度)</label>
-          <input 
-            type="range" 
-            min="5" 
-            max="20" 
-            step="1" 
-            value={settings.speed} 
-            on:input={(e) => updateSetting('speed', parseInt(e.target.value))}
-          />
-          <span class="slider-value">{settings.speed}</span>
-        </div>
-        <div class="setting-item slider">
-          <label class="setting-label">音符大小</label>
-          <input 
-            type="range" 
-            min="10" 
-            max="30" 
-            step="1" 
-            value={settings.noteRadius} 
-            on:input={(e) => updateSetting('noteRadius', parseInt(e.target.value))}
-          />
-          <span class="slider-value">{settings.noteRadius}</span>
-        </div>
-        <div class="setting-item select">
-          <label class="setting-label">轨道数量</label>
-          <select 
-            value={settings.laneCount} 
-            on:change={(e) => updateSetting('laneCount', parseInt(e.target.value))}
-          >
+          <div class="setting-item slider">
+            <label class="setting-label" for="speed">游戏速度 (音符下落速度)</label>
+            <input 
+              type="range" 
+              min="5" 
+              max="20" 
+              step="1" 
+              value={settings.speed} 
+              on:input={(e) => updateSetting('speed', parseInt(e.target.value))}
+              id="speed"
+            />
+            <span class="slider-value">{settings.speed}</span>
+          </div>
+          <div class="setting-item slider">
+            <label class="setting-label" for="noteRadius">音符大小</label>
+            <input 
+              type="range" 
+              min="10" 
+              max="30" 
+              step="1" 
+              value={settings.noteRadius} 
+              on:input={(e) => updateSetting('noteRadius', parseInt(e.target.value))}
+              id="noteRadius"
+            />
+            <span class="slider-value">{settings.noteRadius}</span>
+          </div>
+          <div class="setting-item select">
+            <label class="setting-label" for="laneCount">轨道数量</label>
+            <select 
+              value={settings.laneCount} 
+              on:change={(e) => updateSetting('laneCount', parseInt(e.target.value))}
+              id="laneCount"
+              disabled
+            >
             <option value="4">4轨道 (标准)</option>
-            <option value="6">6轨道 (进阶)</option>
           </select>
         </div>
       </div>
     </section>
     
-    <!-- 显示设置 --<section class="settings-section">
+    <!-- 显示设置 -->
+    <section class="settings-section">
       <h2 class="section-title">🖥️ 显示设置</h2>
       <div class="settings-group">
         <div class="setting-item">
-          <label class="setting-label">
+          <label class="setting-label" for="fullscreenToggle">
             <input 
               type="checkbox" 
+              id="fullscreenToggle"
               checked={settings.fullscreen} 
               on:change={toggleFullscreen}
             />
             全屏模式
-          <label/
+          </label>
         </div>
       </div>
     </section>
     
-    <!-- 预设配置 --<section class="settings-section">
+    <!-- 预设配置 -->
+    <section class="settings-section">
       <h2 class="section-title">⚙️ 预设配置</h2>
       <div class="preset-buttons">
         <button 
@@ -276,7 +286,7 @@
         <button 
           class="preset-button" 
           on:click={() => applyDifficultyPreset('expert')}
-        >专家模式 (6轨道)</button>
+        >专家模式 (4轨道)</button>
       </div>
     </section>
     
@@ -404,6 +414,13 @@
     outline: none;
     -webkit-appearance: none;
     appearance: none;
+    cursor: pointer;
+    transition: background 0.3s ease;
+    touch-action: manipulation;
+  }
+  
+  .setting-item input[type="range"]:active {
+    background: rgba(255, 255, 255, 0.2);
   }
   
   .setting-item input[type="range"]::-webkit-slider-thumb {
@@ -415,6 +432,18 @@
     border-radius: 50%;
     cursor: pointer;
     box-shadow: 0 0 10px var(--accent-color);
+    transition: transform 0.2s ease;
+    touch-action: manipulation;
+  }
+  
+  .setting-item input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 15px var(--accent-color);
+  }
+  
+  .setting-item input[type="range"]::-webkit-slider-thumb:active {
+    transform: scale(1.2);
+    box-shadow: 0 0 20px var(--accent-color);
   }
   
   .setting-item input[type="range"]::-moz-range-thumb {
@@ -425,6 +454,17 @@
     cursor: pointer;
     box-shadow: 0 0 10px var(--accent-color);
     border: none;
+    transition: transform 0.2s ease;
+  }
+  
+  .setting-item input[type="range"]::-moz-range-thumb:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 15px var(--accent-color);
+  }
+  
+  .setting-item input[type="range"]::-moz-range-thumb:active {
+    transform: scale(1.2);
+    box-shadow: 0 0 20px var(--accent-color);
   }
   
   .slider-value {

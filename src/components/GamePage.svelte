@@ -31,25 +31,25 @@
   let gameArea;
   let judgmentLine;
   
-  // 游戏配置
-  const laneCount = gameConfig.laneCount || 4;
-  const noteSpeed = gameConfig.speed || 10;
-  const noteRadius = gameConfig.noteRadius || 20;
+  // 游戏配置 - 使用响应式引用
+  $: laneCount = gameConfig.laneCount || 4;
+  $: noteSpeed = gameConfig.speed || 10;
+  $: noteRadius = gameConfig.noteRadius || 20;
   
-  // 判定阈值（毫秒）
+  // 判定阈值（毫秒） - 降低难度，增大判定窗口
   const judgmentThresholds = {
-    perfect: 50,
-    great: 100,
-    good: 150,
-    bad: 200
+    perfect: 80,  // 增大完美判定窗口
+    great: 150,   // 增大良好判定窗口
+    good: 250,    // 增大一般判定窗口
+    bad: 350      // 增大可接受判定窗口
   };
   
-  // 分数计算配置
+  // 分数计算配置 - 增加基础分数
   const scoreValues = {
-    perfect: 1000,
-    great: 700,
-    good: 400,
-    bad: 100,
+    perfect: 1200,
+    great: 800,
+    good: 500,
+    bad: 200,
     miss: 0
   };
   
@@ -90,7 +90,7 @@
       songAudio.pause();
       songAudio = null;
     }
-    // 停止背景音乐
+    // 停止所有背景音乐
     audioManager.stopBGM();
     
     // 移除全局键盘事件监听器
@@ -171,12 +171,22 @@
   async function startGame() {
     // 初始化音频系统
     try {
-      // 加载并播放背景音乐
-      if (song && song.audioUrl) {
-        await audioManager.loadBGM(song.audioUrl);
+      // 停止主菜单音乐（如果正在播放）
+      audioManager.stopBGM();
+      
+      // 加载并播放游戏背景音乐
+      if (gameConfig.audioEnabled) {
+        if (song && song.audioUrl) {
+          // 使用歌曲自带的音频
+          await audioManager.loadBGM('game_music', song.audioUrl);
+        } else {
+          // 使用默认游戏背景音乐
+          await audioManager.loadBGM('game_music', 'https://example.com/game_music.mp3');
+        }
+        
         if (gameConfig.audioEnabled) {
-          audioManager.playBGM();
-          console.log('成功播放歌曲:', song.title);
+          audioManager.playBGM('game_music');
+          console.log('成功播放游戏音乐');
         }
       }
     } catch (error) {
@@ -466,18 +476,46 @@
     }
   }
   
-  // 结束游戏
-  function endGame() {
-    stopGame();
-    
-    // 计算最终准确率
+  // 计算准确率的辅助函数
+  function calculateAccuracy() {
     const totalNotes = Object.values(judgments).reduce((sum, count) => sum + count, 0);
     if (totalNotes > 0) {
       const perfectNotes = judgments.perfect || 0;
       const greatNotes = judgments.great || 0;
       const goodNotes = judgments.good || 0;
-      const accuracyScore = (perfectNotes * 3 + greatNotes * 2 + goodNotes * 1) / (totalNotes * 3) * 100;
-      accuracy = Math.round(accuracyScore);
+      return (perfectNotes * 3 + greatNotes * 2 + goodNotes * 1) / (totalNotes * 3) * 100;
+    }
+    return 0;
+  }
+  
+  // 结束游戏
+  function endGame() {
+    stopGame();
+    
+    // 停止游戏音乐
+    if (songAudio) {
+      songAudio.pause();
+      songAudio = null;
+    }
+    audioManager.stopBGM('game_music');
+    
+    // 计算最终准确率（只计算一次）
+    const finalAccuracy = calculateAccuracy();
+    accuracy = Math.round(finalAccuracy);
+    
+    // 播放游戏结束音乐（胜利或失败）
+    if (gameConfig.audioEnabled) {
+      if (finalAccuracy >= 70) {
+        // 播放胜利音乐
+        audioManager.loadBGM('victory_music', 'https://example.com/victory_music.mp3').then(() => {
+          audioManager.playBGM('victory_music');
+        });
+      } else {
+        // 播放失败音乐
+        audioManager.loadBGM('defeat_music', 'https://example.com/defeat_music.mp3').then(() => {
+          audioManager.playBGM('defeat_music');
+        });
+      }
     }
     
     // 保存高分记录

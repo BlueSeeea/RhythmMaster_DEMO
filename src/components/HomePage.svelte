@@ -1,6 +1,7 @@
 <script>
-  import { onMount, createEventDispatcher } from 'svelte';
+  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { songs } from '../utils/songsData';
+  import audioManager from '../utils/audioManager';
   
   // 创建事件分发器
   const dispatch = createEventDispatcher();
@@ -23,6 +24,39 @@
     setTimeout(() => {
       isVisible = true;
     }, 100);
+    
+    // 加载并播放主界面背景音乐
+    if (gameConfig.audioEnabled && audioManager && typeof audioManager.loadBGM === 'function') {
+      // 使用模拟的音乐URL，实际项目中需要替换为真实的音频文件
+      audioManager.loadBGM('main_menu', 'https://example.com/main_menu.mp3').then(() => {
+        audioManager.playBGM('main_menu');
+      });
+    }
+    
+    // 添加触摸事件支持滑动
+    const container = document.querySelector('.home-container');
+    if (container) {
+      let startY = 0;
+      let currentScrollTop = 0;
+      
+      container.addEventListener('touchstart', (e) => {
+        startY = e.touches[0].clientY;
+        currentScrollTop = container.scrollTop;
+      });
+      
+      container.addEventListener('touchmove', (e) => {
+        e.preventDefault(); // 防止默认的滚动行为
+        const deltaY = e.touches[0].clientY - startY;
+        container.scrollTop = currentScrollTop - deltaY;
+      });
+    }
+  });
+  
+  // 页面销毁时停止背景音乐
+  onDestroy(() => {
+    if (audioManager && typeof audioManager.stopBGM === 'function') {
+      audioManager.stopBGM('main_menu');
+    }
   });
   
   // 选择歌曲
@@ -63,6 +97,10 @@
           <div 
             class={`song-card ${selectedSong.id === song.id ? 'selected' : ''}`}
             on:click={() => handleSongSelect(song)}
+            on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSongSelect(song); }}
+            role="button"
+            tabindex="0"
+            aria-label={`选择歌曲 ${song.title}`}
           >
             <div class="song-cover">
               <!-- 歌曲封面将通过CSS或SVG实现 -->
@@ -87,7 +125,7 @@
       <button class="back-button" on:click={backToSongSelect}>← 返回歌曲选择</button>
       <h3 class="section-title">选择难度 - {selectedSong.title}</h3>
       <div class="difficulty-options">
-        {#each ['easy', 'normal', 'hard'] as difficulty}
+        {#each ['easy', 'normal', 'hard', 'expert'] as difficulty}
           {#if selectedSong.difficulty[difficulty]}
           <button
             class={`difficulty-button ${difficulty}`}
@@ -122,10 +160,34 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     padding: 20px;
     opacity: 0;
     transition: opacity 0.8s ease;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    position: relative;
+  }
+  
+  /* 添加滚动条样式 */
+  .home-container::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .home-container::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+  }
+  
+  .home-container::-webkit-scrollbar-thumb {
+    background: rgba(122, 0, 255, 0.3);
+    border-radius: 10px;
+  }
+  
+  .home-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(122, 0, 255, 0.5);
   }
   
   .game-header {
@@ -269,9 +331,14 @@
     box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
   }
   
-  .difficulty-button.medium:hover {
+  .difficulty-button.normal:hover {
     border-color: var(--judgment-great);
     box-shadow: 0 0 20px rgba(0, 191, 255, 0.3);
+  }
+  
+  .difficulty-button.expert:hover {
+    border-color: var(--judgment-miss);
+    box-shadow: 0 0 20px rgba(255, 0, 0, 0.3);
   }
   
   .difficulty-button.hard:hover {
@@ -302,12 +369,12 @@
   }
   
   .home-footer {
-    position: absolute;
-    bottom: 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 15px;
+    margin-top: auto;
+    margin-bottom: 20px;
   }
   
   .settings-button {
@@ -325,28 +392,72 @@
   
   @media (max-width: 768px) {
     .game-title {
-      font-size: 3rem;
+      font-size: 2.5rem;
     }
     
     .game-subtitle {
-      font-size: 1.2rem;
+      font-size: 1rem;
     }
     
     .section-title {
-      font-size: 1.5rem;
+      font-size: 1.3rem;
+      margin-bottom: 20px;
+    }
+    
+    .game-header {
+      margin-bottom: 25px;
     }
     
     .songs-grid {
       grid-template-columns: 1fr;
+      gap: 15px;
+    }
+    
+    .song-card {
+      padding: 15px;
     }
     
     .song-cover {
-      width: 100px;
-      height: 100px;
+      width: 80px;
+      height: 80px;
+      margin-bottom: 10px;
     }
     
     .cover-placeholder {
-      font-size: 2.5rem;
+      font-size: 2rem;
+    }
+    
+    .song-title {
+      font-size: 1.1rem;
+    }
+    
+    .back-button {
+      position: relative;
+      top: 0;
+      left: 0;
+      margin-bottom: 20px;
+    }
+    
+    .difficulty-button {
+      padding: 15px;
+    }
+    
+    .home-footer {
+      margin-bottom: 15px;
+    }
+    
+    .settings-button {
+      padding: 8px 16px;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    .game-title {
+      font-size: 2rem;
+    }
+    
+    .home-container {
+      padding: 15px;
     }
   }
 </style>
