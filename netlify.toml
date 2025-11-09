@@ -9,9 +9,7 @@
   publish = "dist"
   
   # 设置Node.js版本
-  environment = {
-    NODE_VERSION = "16"
-  }
+  environment = { NODE_VERSION = "16" }
 
 # 重定向规则，用于单页应用路由
 [[redirects]]
