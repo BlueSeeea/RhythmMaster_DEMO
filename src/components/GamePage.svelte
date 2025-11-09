@@ -75,6 +75,10 @@
     await tick();
     initializeGameDimensions();
     
+    // 添加全局键盘事件监听器
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    
     // 开始游戏
     startGame();
   });
@@ -88,6 +92,10 @@
     }
     // 停止背景音乐
     audioManager.stopBGM();
+    
+    // 移除全局键盘事件监听器
+    document.removeEventListener('keydown', handleKeyDown);
+    document.removeEventListener('keyup', handleKeyUp);
   });
   
   // 初始化游戏尺寸
@@ -106,32 +114,74 @@
     judgmentLine.style.top = judgmentLineY + 'px';
   }
   
-  // 生成音符数据
+  // 生成音符 - 基于时间的音符生成系统
   function generateNotes() {
+    console.log('生成游戏音符...');
     notes = [];
-    const noteCount = song.difficulty[difficulty].notes;
-    const beatInterval = 1000; // 每1秒一个节拍（示例值）
     
-    for (let i = 0; i < noteCount; i++) {
-      const lane = Math.floor(Math.random() * laneCount);
-      const timing = (i + 1) * beatInterval;
+    // 基于时间生成音符，确保每个音符都有createdAt属性
+    const now = Date.now();
+    let noteId = 0;
+    
+    // 首先生成一些立即可见的音符，确保游戏开始就能看到效果
+    for (let i = 0; i < laneCount; i++) {
+      for (let j = 0; j < 2; j++) {
+        const note = {
+          id: `note_${noteId++}`,
+          lane: i,
+          position: 50 + j * 150, // 初始位置在屏幕上方
+          createdAt: now - (j * 500), // 为立即可见的音符设置过去的时间
+          hit: false,
+          judgment: null
+        };
+        notes.push(note);
+      }
+    }
+    
+    // 然后生成未来会出现的音符，形成连续的音符流
+    for (let timeOffset = 1000; timeOffset < 10000; timeOffset += 300) {
+      // 每个时间点随机选择1-2个轨道生成音符
+      const lanesThisTime = [];
+      const noteCountThisTime = Math.floor(Math.random() * 2) + 1;
       
-      notes.push({
-        id: i,
-        lane,
-        timing,
-        hit: false,
-        judgment: null,
-        position: 0,
-        createdAt: null
+      while (lanesThisTime.length < noteCountThisTime) {
+        const randomLane = Math.floor(Math.random() * laneCount);
+        if (!lanesThisTime.includes(randomLane)) {
+          lanesThisTime.push(randomLane);
+        }
+      }
+      
+      lanesThisTime.forEach(lane => {
+        const note = {
+          id: `note_${noteId++}`,
+          lane: lane,
+          position: -noteRadius * 2, // 从屏幕顶部外开始
+          createdAt: now + timeOffset, // 设置未来的创建时间
+          hit: false,
+          judgment: null
+        };
+        notes.push(note);
       });
     }
+    
+    console.log('音符生成完成，总数:', notes.length);
   }
   
   // 开始游戏
-  function startGame() {
-    // 模拟音频加载
-    simulateAudioPlayback();
+  async function startGame() {
+    // 初始化音频系统
+    try {
+      // 加载并播放背景音乐
+      if (song && song.audioUrl) {
+        await audioManager.loadBGM(song.audioUrl);
+        if (gameConfig.audioEnabled) {
+          audioManager.playBGM();
+          console.log('成功播放歌曲:', song.title);
+        }
+      }
+    } catch (error) {
+      console.warn('音频加载失败，使用模拟模式:', error);
+    }
     
     // 设置开始时间
     startTime = Date.now();
@@ -142,12 +192,6 @@
     gameLoop();
   }
   
-  // 模拟音频播放（实际项目中使用真实音频）
-  function simulateAudioPlayback() {
-    // 这里只是模拟，实际应该使用真实音频文件
-    console.log('开始播放歌曲:', song.title);
-  }
-  
   // 游戏主循环
   function gameLoop() {
     if (!isPlaying || isPaused) return;
@@ -155,6 +199,11 @@
     const currentTime = Date.now();
     const deltaTime = currentTime - lastTime;
     gameTime = currentTime - startTime;
+    
+    // 动态生成新音符，确保音符持续出现
+    if (notes.length < 50) { // 限制最大音符数量，避免内存问题
+      generateAdditionalNotes(currentTime);
+    }
     
     // 更新音符位置
     updateNotes(deltaTime);
@@ -164,6 +213,9 @@
     
     // 更新游戏状态
     updateGameStatus();
+    
+    // 清理已离开屏幕的音符
+    cleanupOldNotes();
     
     // 检查游戏是否结束
     if (gameTime >= gameDuration * 1000) {
@@ -175,31 +227,69 @@
     animationFrameId = requestAnimationFrame(gameLoop);
   }
   
-  // 更新音符位置
-  function updateNotes(deltaTime) {
-    const gameAreaHeight = gameArea.offsetHeight;
-    const spawnTime = 2000; // 音符从生成到判定线的时间
+  // 动态生成额外的音符
+  let nextNoteId = 1000; // 避免ID冲突
+  function generateAdditionalNotes(currentTime) {
+    // 随机决定是否生成新音符
+    if (Math.random() > 0.3) return; // 70%概率不生成
     
-    // 激活应该出现的音符
+    // 随机选择1个轨道生成音符
+    const randomLane = Math.floor(Math.random() * laneCount);
+    
+    const note = {
+      id: `note_${nextNoteId++}`,
+      lane: randomLane,
+      position: -noteRadius * 2, // 从屏幕顶部外开始
+      createdAt: currentTime + 1000, // 1秒后出现
+      hit: false,
+      judgment: null
+    };
+    
+    notes.push(note);
+  }
+  
+  // 清理离开屏幕的旧音符
+  function cleanupOldNotes() {
+    const gameAreaHeight = gameArea.offsetHeight || 600;
+    const cleanupThreshold = gameAreaHeight + 100; // 屏幕底部下方
+    
+    // 过滤掉已经离开屏幕且未被击中的音符
+    notes = notes.filter(note => 
+      !note.hit || note.position <= cleanupThreshold
+    );
+  }
+  
+  // 更新音符位置 - 基于时间差的精确计算
+  function updateNotes(deltaTime) {
+    const currentTime = Date.now();
+    const gameAreaHeight = gameArea.offsetHeight || 600;
+    
     notes.forEach(note => {
-      if (!note.createdAt && gameTime >= note.timing - spawnTime) {
-        note.createdAt = gameTime;
-      }
-      
-      if (note.createdAt && !note.hit) {
-        // 计算音符位置
-        const elapsedTime = gameTime - note.createdAt;
-        note.position = (elapsedTime / spawnTime) * gameAreaHeight;
+      // 只有当音符应该已经创建并且未被击中时才更新位置
+      if (!note.hit && currentTime >= note.createdAt) {
+        // 计算音符已经存在的时间
+        const noteAge = currentTime - note.createdAt;
+        
+        // 根据速度和存在时间计算位置
+        // 这里使用noteSpeed * (deltaTime / 16)来确保不同帧率下速度一致
+        const speedMultiplier = noteSpeed / 10; // 调整速度比例
+        note.position += speedMultiplier * (deltaTime / 16) * 3;
+        
+        // 确保音符在创建时从正确位置开始
+        if (note.position < -noteRadius * 2) {
+          note.position = -noteRadius * 2;
+        }
       }
     });
   }
   
   // 检查错过的音符
   function checkMissedNotes() {
-    const judgmentLineY = gameArea.offsetHeight * 0.8;
-    const missThreshold = judgmentLineY + 50;
+    const gameAreaHeight = gameArea.offsetHeight || 600;
+    const missThreshold = gameAreaHeight + 50; // 屏幕底部下方一点
     
     notes.forEach(note => {
+      // 检查是否应该已经创建、未被击中且超过了错过阈值
       if (note.createdAt && !note.hit && note.position > missThreshold) {
         handleMiss(note);
       }
@@ -210,13 +300,24 @@
   function handleNoteHit(lane) {
     if (!isPlaying || isPaused) return;
     
-    // 找到该轨道上最接近判定线的未击中音符
-    const judgmentLineY = gameArea.offsetHeight * 0.8;
+    const gameAreaHeight = gameArea.offsetHeight || 600;
+    const judgmentLineY = gameAreaHeight * 0.8;
+    
+    // 找到该轨道上未击中且在合理范围内的音符
+    const currentTime = Date.now();
     const laneNotes = notes.filter(
-      note => note.lane === lane && note.createdAt && !note.hit
+      note => note.lane === lane && note.createdAt && !note.hit && 
+             currentTime >= note.createdAt && // 只考虑已经创建的音符
+             note.position < judgmentLineY + 100 // 只考虑在判定线附近的音符
     );
     
-    if (laneNotes.length === 0) return;
+    if (laneNotes.length === 0) {
+      // 如果没有可击中的音符，播放miss音效
+      if (audioManager && gameConfig.sfxEnabled) {
+        audioManager.playSoundEffect('miss');
+      }
+      return;
+    }
     
     // 按位置排序，找到最接近判定线的音符
     laneNotes.sort((a, b) => Math.abs(a.position - judgmentLineY) - Math.abs(b.position - judgmentLineY));
@@ -224,26 +325,37 @@
     
     const distance = Math.abs(targetNote.position - judgmentLineY);
     
-    // 判断是否在可击中范围内
-    if (distance < judgmentThresholds.bad + 50) {
+    // 判断是否在可击中范围内（扩大范围以提高可命中性）
+    if (distance < judgmentThresholds.bad + 80) {
       const judgment = calculateJudgment(distance);
       registerHit(targetNote, judgment);
       
       // 播放击中音效
-      if (audioManager) {
+      if (audioManager && gameConfig.sfxEnabled) {
         // 根据判定类型播放不同音效
         const soundName = `hit_${judgment}`;
         audioManager.playSoundEffect(soundName);
       }
+    } else {
+      // 在范围内但距离太远，算miss
+      handleMiss(targetNote);
     }
   }
   
   // 计算判定结果
   function calculateJudgment(distance) {
-    if (distance <= judgmentThresholds.perfect) return 'perfect';
-    if (distance <= judgmentThresholds.great) return 'great';
-    if (distance <= judgmentThresholds.good) return 'good';
-    if (distance <= judgmentThresholds.bad) return 'bad';
+    // 调整判定阈值，使游戏更容易上手
+    const adjustedThresholds = {
+      perfect: judgmentThresholds.perfect * 3, // 扩大perfect判定范围
+      great: judgmentThresholds.great * 2.5,
+      good: judgmentThresholds.good * 2,
+      bad: judgmentThresholds.bad * 1.5
+    };
+    
+    if (distance <= adjustedThresholds.perfect) return 'perfect';
+    if (distance <= adjustedThresholds.great) return 'great';
+    if (distance <= adjustedThresholds.good) return 'good';
+    if (distance <= adjustedThresholds.bad) return 'bad';
     return 'miss';
   }
   
@@ -251,8 +363,12 @@
   function registerHit(note, judgment) {
     note.hit = true;
     note.judgment = judgment;
+    note.className = 'hit'; // 添加hit类以触发动画
     
     // 更新判定统计
+    if (!judgments[judgment]) {
+      judgments[judgment] = 0;
+    }
     judgments[judgment]++;
     
     // 更新分数
@@ -271,6 +387,14 @@
     
     // 显示判定结果
     showJudgment(judgment, note.lane);
+    
+    // 清理已击中的音符，避免DOM过多
+    setTimeout(() => {
+      const index = notes.findIndex(n => n.id === note.id);
+      if (index !== -1) {
+        notes.splice(index, 1);
+      }
+    }, 300);
   }
   
   // 处理错过
@@ -417,9 +541,40 @@
     }
   }
   
-  // 处理触摸输入
-  function handleLaneTouch(lane) {
-    handleNoteHit(lane);
+  // 处理触摸区域的键盘事件
+  function handleTouchKeyDown(event, laneIndex) {
+    // 只响应空格键或回车键作为确认键
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      handleLaneTouch(laneIndex);
+    }
+  }
+  
+  // 处理轨道触摸
+  function handleLaneTouch(laneIndex) {
+    if (!isPlaying || isPaused) return;
+    
+    // 查找该轨道上最接近判定线的未击中音符
+    const laneNotes = notes.filter(note => note.lane === laneIndex && !note.hit);
+    if (laneNotes.length === 0) return;
+    
+    // 按位置排序，找出最接近判定线的音符
+    laneNotes.sort((a, b) => Math.abs(a.position - judgmentLinePosition) - Math.abs(b.position - judgmentLinePosition));
+    const closestNote = laneNotes[0];
+    
+    // 检查是否在可命中范围内
+    const distance = Math.abs(closestNote.position - judgmentLinePosition);
+    if (distance <= hitRange) {
+      handleNoteHit(closestNote);
+    } else if (closestNote.position > judgmentLinePosition) {
+      // 如果音符已经超过判定线，则判定为miss
+      registerHit(closestNote, 'miss');
+    }
+  }
+  
+  // 处理游戏区域的键盘松开事件
+  function handleKeyUp(event) {
+    // 可以在这里添加键盘松开时的逻辑
   }
   
   // 获取当前游戏时间格式
@@ -430,7 +585,7 @@
   }
 </script>
 
-<div class="game-page" bind:this={gameContainer} on:keydown={handleKeyDown}>
+<div class="game-page" bind:this={gameContainer}>
   {#if isPaused}
     <div class="pause-overlay">
       <h2 class="pause-text">游戏暂停</h2>
@@ -472,10 +627,15 @@
   </div>
   
   <!-- 游戏区域 -->
-  <div class="game-area" bind:this={gameArea}>
-    <!-- 轨道背景 --<div class="lanes-background">
+  <div class="game-area" bind:this={gameArea} role="application" aria-label="节奏游戏主区域">
+    <!-- 轨道背景 -->
+    <div class="lanes-background">
       {#each Array(laneCount) as _, i}
-        <div class="lane" style="width: {100 / laneCount}%"></div>
+        <div class="lane" style="width: calc(100% / {laneCount});">
+          <div class="lane-indicator" style="position: absolute; top: 10px; left: 0; width: 100%; text-align: center; color: rgba(255,255,255,0.5); font-size: 14px;">
+            {['D', 'F', 'J', 'K'][i] || (i + 1)}
+          </div>
+        </div>
       {/each}
     </div>
     
@@ -483,37 +643,42 @@
     <div class="judgment-line" bind:this={judgmentLine}>
       <div class="judgment-line-glow"></div>
     </div>
-    >
-    <!-- 音符 -->
+    
+    <!-- 动态音符渲染 -->
     {#each notes as note}
-      {#if note.createdAt && !note.hit}
+      {#if !note.hit}
         <div 
-          class={`note lane-${note.lane} ${note.judgment ? note.judgment : ''}`}
-          style={`
-            left: ${(note.lane / laneCount) * 100}%;
-            top: ${note.position}px;
-            width: ${noteRadius * 2}px;
-            height: ${noteRadius * 2}px;
-          `}
+          class="note" 
+          style="
+            left: calc({note.lane} * (100% / {laneCount}) + 50% / {laneCount});
+            top: {note.position}px;
+            width: {noteRadius * 2}px;
+            height: {noteRadius * 2}px;
+            --note-color: {['#ff6b6b', '#4ecdc4', '#ffe66d', '#6a0572'][note.lane % 4]};
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          "
         >
           <div class="note-inner"></div>
         </div>
       {/if}
     {/each}
-    >
+    
     <!-- 触摸区域 -->
     <div class="touch-areas">
       {#each Array(laneCount) as _, i}
         <div 
           class="touch-area" 
-          style="width: {100 / laneCount}%"
-          on:touchstart={() => handleLaneTouch(i)}
+          style="width: calc(100% / {laneCount});"
           on:click={() => handleLaneTouch(i)}
+            on:keydown={(e) => handleTouchKeyDown(e, i)}
+          role="button" 
+          aria-label={`轨道${i + 1}触摸区域`}
+          tabindex="0"
         >
           <div class="touch-feedback"></div>
-          <span class="key-hint">
-            {i === 0 ? 'D/1' : i === 1 ? 'F/2' : i === 2 ? 'J/3' : 'K/4'}
-          </span>
+          <div class="key-hint">{['D', 'F', 'J', 'K'][i] || (i + 1)}</div>
         </div>
       {/each}
     </div>
@@ -531,6 +696,16 @@
 </div>
 
 <style>
+  :root {
+    --text-primary: #ffffff;
+    --text-secondary: #b0b0b0;
+    --surface-color: #2a2a4a;
+    --accent-color: #ff6b6b;
+    --secondary-color: #4ecdc4;
+    --judgment-perfect: #ffd700;
+    --judgment-line-height: 4px;
+  }
+  
   .game-page {
     width: 100%;
     height: 100%;
@@ -629,7 +804,8 @@
     position: relative;
     margin-top: 120px;
     height: calc(100% - 120px);
-    overflow: hidden;
+    overflow: visible; /* 允许音符显示在游戏区域外 */
+    background-color: rgba(0, 0, 0, 0.2);
   }
   
   .lanes-background {
@@ -658,7 +834,8 @@
     height: var(--judgment-line-height);
     background: var(--accent-color);
     z-index: 10;
-    transform: translateY(-50%);
+    /* 移除translateY，直接设置位置 */
+    top: 80%;
   }
   
   .judgment-line-glow {
@@ -678,23 +855,88 @@
     transform: translate(-50%, -50%);
     border-radius: 50%;
     background: var(--note-color);
-    box-shadow: 0 0 20px var(--note-color);
-    z-index: 5;
+    box-shadow: 
+      0 0 20px var(--note-color),
+      0 0 30px rgba(255, 255, 255, 0.5),
+      inset 0 0 10px rgba(255, 255, 255, 0.3);
+    z-index: 100;
     transition: all 0.1s ease;
+    border: 2px solid white;
+    opacity: 1;
+    visibility: visible;
   }
   
   .note-inner {
-    width: 80%;
-    height: 80%;
+    width: 60%;
+    height: 60%;
     background: white;
     border-radius: 50%;
-    margin: 10%;
+    margin: 20%;
+    box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.2);
   }
   
-  .note.perfect {
-    background: var(--judgment-perfect);
-    box-shadow: 0 0 20px var(--judgment-perfect);
-    transform: translate(-50%, -50%) scale(1.2);
+  .note.hit {
+    animation: hitAnimation 0.3s ease-out forwards;
+  }
+  
+  @keyframes hitAnimation {
+    0% {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: translate(-50%, -50%) scale(1.3);
+      opacity: 0.8;
+    }
+    100% {
+      transform: translate(-50%, -50%) scale(0);
+      opacity: 0;
+    }
+  }
+  
+  /* 判定结果样式 */
+  .judgment {
+    position: absolute;
+    font-size: 24px;
+    font-weight: bold;
+    z-index: 200;
+    animation: judgmentFloat 0.6s ease-out forwards;
+  }
+  
+  .judgment.perfect {
+    color: #ffd700;
+    text-shadow: 0 0 10px #ffd700, 0 0 20px #ffd700;
+  }
+  
+  .judgment.great {
+    color: #4ecdc4;
+    text-shadow: 0 0 10px #4ecdc4, 0 0 15px #4ecdc4;
+  }
+  
+  .judgment.good {
+    color: #ffe66d;
+    text-shadow: 0 0 10px #ffe66d;
+  }
+  
+  .judgment.bad {
+    color: #ff6b6b;
+    text-shadow: 0 0 10px #ff6b6b;
+  }
+  
+  .judgment.miss {
+    color: #888;
+    text-shadow: 0 0 10px #888;
+  }
+  
+  @keyframes judgmentFloat {
+    0% {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: translate(-50%, -100%) scale(1.2);
+      opacity: 0;
+    }
   }
   
   .touch-areas {

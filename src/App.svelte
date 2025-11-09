@@ -4,10 +4,11 @@
   import GamePage from './components/GamePage.svelte';
   import ScorePage from './components/ScorePage.svelte';
   import SettingsPage from './components/SettingsPage.svelte';
+  import SimpleNoteTest from './components/SimpleNoteTest.svelte';
   import audioManager from './utils/audioManager';
   
   // 游戏状态管理
-  let currentPage = 'home'; // home, game, score, settings
+  let currentPage = 'home'; // home, game, score, settings, test
   let selectedSong = null;
   let selectedDifficulty = 'easy';
   let gameResults = null;
@@ -105,6 +106,11 @@
         navigateTo('home');
       }
     }
+    
+    // 按T键进入测试页面
+    if (event.key === 't' && event.ctrlKey) {
+      navigateTo('test');
+    }
   }
 </script>
 
@@ -135,6 +141,8 @@
       on:updateConfig={({ detail }) => updateGameConfig(detail)}
       on:back={() => navigateTo('home')}
     />
+  {:else if currentPage === 'test'}
+    <SimpleNoteTest />
   {/if}
 </div>
 
