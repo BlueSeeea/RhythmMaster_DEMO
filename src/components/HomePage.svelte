@@ -9,45 +9,9 @@
   
   // 使用导入的歌曲数据
   let songList = songs;
-    {
-      id: 1,
-      title: '电子幻想',
-      artist: '虚拟音乐家',
-      difficulty: {
-        easy: { level: 3, notes: 120 },
-        medium: { level: 5, notes: 200 },
-        hard: { level: 8, notes: 320 }
-      },
-      coverUrl: '/assets/covers/song1.svg',
-      audioUrl: '/assets/audio/song1.mp3'
-    },
-    {
-      id: 2,
-      title: '城市节拍',
-      artist: '节奏大师',
-      difficulty: {
-        easy: { level: 2, notes: 100 },
-        medium: { level: 4, notes: 180 },
-        hard: { level: 7, notes: 280 }
-      },
-      coverUrl: '/assets/covers/song2.svg',
-      audioUrl: '/assets/audio/song2.mp3'
-    },
-    {
-      id: 3,
-      title: '梦幻星空',
-      artist: '电音传奇',
-      difficulty: {
-        easy: { level: 4, notes: 140 },
-        medium: { level: 6, notes: 240 },
-        hard: { level: 9, notes: 360 }
-      },
-      coverUrl: '/assets/covers/song3.svg',
-      audioUrl: '/assets/audio/song3.mp3'
-    }
-  ];
   
-  let selectedSong = songList[0] || songList[0]; // 确保安全访问
+  // 确保安全访问第一个歌曲
+  let selectedSong = songList.length > 0 ? songList[0] : null;
   let selectedDifficulty = 'easy';
   let showDifficultySelect = false;
   
@@ -110,7 +74,7 @@
               <div class="song-difficulty">
                 <span class="difficulty-label">难度范围:</span>
                 <span class="difficulty-stars">
-                  {song.difficulty.easy ? getDifficultyStars(3) : 'N/A'} ~ {song.difficulty.hard ? getDifficultyStars(8) : song.difficulty.normal ? getDifficultyStars(5) : 'N/A'}
+                  {song.difficulty.easy ? getDifficultyStars(3) : 'N/A'} ~ {song.difficulty.expert ? getDifficultyStars(6) : song.difficulty.hard ? getDifficultyStars(5) : song.difficulty.normal ? getDifficultyStars(4) : 'N/A'}
                 </span>
               </div>
             </div>
@@ -123,7 +87,7 @@
       <button class="back-button" on:click={backToSongSelect}>← 返回歌曲选择</button>
       <h3 class="section-title">选择难度 - {selectedSong.title}</h3>
       <div class="difficulty-options">
-        {#each ['easy', 'medium', 'hard'] as difficulty}
+        {#each ['easy', 'normal', 'hard'] as difficulty}
           {#if selectedSong.difficulty[difficulty]}
           <button
             class={`difficulty-button ${difficulty}`}
@@ -131,9 +95,9 @@
           >
             <div class="difficulty-header">
               <span class="difficulty-name">
-                {difficulty === 'easy' ? '简单' : difficulty === 'medium' || difficulty === 'normal' ? '中等' : '困难'}
+                {difficulty === 'easy' ? '简单' : difficulty === 'normal' ? '中等' : difficulty === 'hard' ? '困难' : '专家'}
               </span>
-              <span class="difficulty-level">{getDifficultyStars(difficulty === 'easy' ? 3 : difficulty === 'normal' ? 5 : 8)}</span>
+              <span class="difficulty-level">{getDifficultyStars(difficulty === 'easy' ? 3 : difficulty === 'normal' ? 4 : difficulty === 'hard' ? 5 : 6)}</span>
             </div>
             <div class="difficulty-info">
               <span>音符数量: {selectedSong.notes[difficulty] ? selectedSong.notes[difficulty].length : 'N/A'}</span>
