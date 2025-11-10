@@ -27,11 +27,21 @@
   let lastTime = 0;
   
   // 游戏配置参数
-  const NOTE_GENERATION_INTERVAL = 400; // 音符生成间隔
-  const NOTE_SPACING = 200; // 音符间距
-  const MAX_NOTES_PER_GENERATION = 2; // 每次生成的最大音符数 - 降低以减少卡顿
-  const MAX_NOTES_ON_LANE = 3; // 同一轨道最多音符数
-  const INITIAL_NOTES_COUNT = 5; // 初始生成的音符数量 - 减少以提高启动性能
+  const NOTE_GENERATION_INTERVAL = 300; // 音符生成间隔 - 缩短间隔以增加生成频率
+  const NOTE_SPACING = 300; // 音符间距 - 增加间距以延长掉落时间
+  const MAX_NOTES_PER_GENERATION = 3; // 每次生成的最大音符数 - 增加以确保足够音符
+  const MAX_NOTES_ON_LANE = 4; // 同一轨道最多音符数 - 增加以支持更长时间游戏
+  const INITIAL_NOTES_COUNT = 8; // 初始生成的音符数量 - 增加以丰富游戏开始体验
+  
+  // 音符间隔控制配置
+  const NOTE_MIN_SPACING = 150; // 音符最小间隔，防止生成过于密集
+  const NOTE_SPACING_VARIATION = 200; // 音符间隔随机变化范围
+  
+  // 当前激活的生成模式
+  let currentGenerationMode = null;
+  let modeActivationTime = 0;
+  const MODE_DURATION_MIN = 5000; // 每种模式最小持续时间(ms)
+  const MODE_DURATION_MAX = 10000; // 每种模式最大持续时间(ms)
   
   // 游戏区域引用
   let gameContainer;
@@ -69,27 +79,28 @@
   let animationFrameId = null;
   
   onMount(async () => {
-    // 配置已导入的音频管理器
-    if (gameConfig.audioEnabled) {
-      audioManager.setBGMVolume(0.8);
-    }
-    if (gameConfig.sfxEnabled) {
-      audioManager.setSFXVolume(0.8);
-    }
-    
-    // 生成游戏音符数据
-    generateNotes();
+    // 添加全局键盘事件监听器
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
     
     // 等待DOM更新后初始化游戏尺寸
     await tick();
     initializeGameDimensions();
     
-    // 添加全局键盘事件监听器
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('keyup', handleKeyUp);
+    // 配置音频管理器（移到后台执行）
+    setTimeout(() => {
+      if (gameConfig.audioEnabled) {
+        audioManager.setBGMVolume(0.8);
+      }
+      if (gameConfig.sfxEnabled) {
+        audioManager.setSFXVolume(0.8);
+      }
+    }, 0);
     
-    // 开始游戏
-    startGame();
+    // 延迟启动游戏，给浏览器时间渲染UI
+    setTimeout(() => {
+      startGame();
+    }, 100);
   });
   
   onDestroy(() => {
@@ -122,7 +133,7 @@
     judgmentLine.style.top = judgmentLinePosition + 'px';
   }
   
-  // 生成音符 - 优化版本
+  // 生成音符 - 优化版本，支持多种生成模式和音符间隔控制
   function generateNotes() {
     notes = [];
     
@@ -133,55 +144,138 @@
     // 跟踪每个轨道上的音符数量
     const laneNoteCount = new Array(laneCount).fill(0);
     
-    // 生成初始音符 - 减少初始音符数量以提高启动性能
-    const noteCount = INITIAL_NOTES_COUNT;
-    
-    for (let i = 0; i < noteCount; i++) {
-      // 尝试找到一个符合限制的轨道（每行最多3个音符）
-      let lane;
-      let attempts = 0;
-      const maxAttempts = 10;
-      
-      while (attempts < maxAttempts) {
-        lane = Math.floor(Math.random() * laneCount);
-        if (laneNoteCount[lane] < MAX_NOTES_ON_LANE) {
-          break;
-        }
-        attempts++;
-      }
-      
-      // 增加该轨道的音符计数
-      laneNoteCount[lane]++;
-      
-      // 从对象池获取音符或创建新音符
-      let note = getNoteFromPool();
-      
-      if (!note) {
-        // 如果对象池为空，创建新对象
-        note = {
-          id: `note_${noteId++}`,
-          lane: lane,
-          position: -noteRadius * 2,
-          createdAt: now + i * 500,
-          hit: false,
-          judgment: null,
-          _pool: false
-        };
-      } else {
-        // 重用对象，更新属性
-        note.id = `note_${noteId++}`;
-        note.lane = lane;
-        note.position = -noteRadius * 2;
-        note.createdAt = now + i * 500;
-      }
-      
-      notes.push(note);
+    // 初始化当前生成模式
+    if (!currentGenerationMode) {
+      currentGenerationMode = selectRandomGenerationMode();
+      modeActivationTime = now;
+      currentModeDuration = MODE_DURATION_MIN + Math.random() * (MODE_DURATION_MAX - MODE_DURATION_MIN);
     }
+    
+    // 生成初始音符 - 增加初始音符数量以支持长时间游戏
+    const noteCount = INITIAL_NOTES_COUNT;
+    let lastCreatedAt = now;
+    
+    // 分批次生成音符，模拟不同的生成模式
+    for (let batch = 0; batch < Math.ceil(noteCount / MAX_NOTES_PER_GENERATION); batch++) {
+      // 确定当前批次生成的音符数量
+      const batchSize = Math.min(noteCount - (batch * MAX_NOTES_PER_GENERATION), MAX_NOTES_PER_GENERATION);
+      
+      // 找到可用的轨道（未满的）
+      const availableLanes = [];
+      for (let i = 0; i < laneCount; i++) {
+        if (laneNoteCount[i] < MAX_NOTES_ON_LANE) {
+          availableLanes.push(i);
+        }
+      }
+      
+      if (availableLanes.length === 0) break;
+      
+      // 使用当前生成模式确定轨道（对于初始音符，我们使用简化的可用轨道列表）
+      let lanesThisBatch;
+      
+      // 特殊处理：对于初始音符，我们希望分布更加多样化
+      if (currentGenerationMode.name === 'random') {
+        // 随机模式直接使用
+        lanesThisBatch = currentGenerationMode.generate(now, notes.filter(note => !note.hit), availableLanes);
+      } else {
+        // 其他模式可能需要调整，这里我们简化处理，确保生成足够的初始音符
+        lanesThisBatch = new Set();
+        while (lanesThisBatch.size < batchSize && availableLanes.length > 0) {
+          const randomIndex = Math.floor(Math.random() * availableLanes.length);
+          lanesThisBatch.add(availableLanes[randomIndex]);
+        }
+      }
+      
+      // 为当前批次的每个音符生成
+      lanesThisBatch.forEach(lane => {
+        // 确保不超过音符总数
+        if (noteId >= noteCount) return;
+        
+        // 增加该轨道的音符计数
+        laneNoteCount[lane]++;
+        
+        // 从对象池获取音符或创建新音符
+        let note = getNoteFromPool();
+        
+        // 计算音符之间的间隔，应用间隔控制机制
+        const spacing = calculateNoteSpacing();
+        const delay = 300 + Math.random() * 400; // 初始音符的间隔略小，以快速进入游戏节奏
+        lastCreatedAt += delay;
+        
+        if (!note) {
+          // 如果对象池为空，创建新对象
+          note = {
+            id: `note_${noteId++}`,
+            lane: lane,
+            position: -noteRadius * 2,
+            createdAt: lastCreatedAt,
+            spacing: spacing,
+            hit: false,
+            judgment: null,
+            _pool: false
+          };
+        } else {
+          // 重用对象，更新属性
+          note.id = `note_${noteId++}`;
+          note.lane = lane;
+          note.position = -noteRadius * 2;
+          note.createdAt = lastCreatedAt;
+          note.spacing = spacing;
+        }
+        
+        notes.push(note);
+      });
+      
+      // 如果当前批次没有生成足够的音符，补充一些随机音符
+      while (noteId < noteCount && noteId < (batch + 1) * MAX_NOTES_PER_GENERATION) {
+        // 找到可用轨道
+        const availableForFill = [];
+        for (let i = 0; i < laneCount; i++) {
+          if (laneNoteCount[i] < MAX_NOTES_ON_LANE) {
+            availableForFill.push(i);
+          }
+        }
+        
+        if (availableForFill.length === 0) break;
+        
+        const lane = availableForFill[Math.floor(Math.random() * availableForFill.length)];
+        laneNoteCount[lane]++;
+        
+        let note = getNoteFromPool();
+        const spacing = calculateNoteSpacing();
+        const delay = 300 + Math.random() * 400;
+        lastCreatedAt += delay;
+        
+        if (!note) {
+          note = {
+            id: `note_${noteId++}`,
+            lane: lane,
+            position: -noteRadius * 2,
+            createdAt: lastCreatedAt,
+            spacing: spacing,
+            hit: false,
+            judgment: null,
+            _pool: false
+          };
+        } else {
+          note.id = `note_${noteId++}`;
+          note.lane = lane;
+          note.position = -noteRadius * 2;
+          note.createdAt = lastCreatedAt;
+          note.spacing = spacing;
+        }
+        
+        notes.push(note);
+      }
+    }
+    
+    // 初始化最后生成时间
+    lastNoteGenTime = now;
   }
   
-  // 对象池优化 - 减少对象创建和垃圾回收
+  // 对象池优化 - 增加池大小以支持3分钟持续生成
   let noteObjectPool = [];
-  const MAX_POOL_SIZE = 50;
+  const MAX_POOL_SIZE = 100; // 增加对象池大小以支持更长时间的游戏
   
   // 从对象池获取音符对象
   function getNoteFromPool() {
@@ -204,20 +298,113 @@
     }
   }
   
-  // 开始游戏 - 优化版本，减少启动时的性能开销
-  async function startGame() {
-    // 初始化游戏状态
+  // 重置游戏状态
+  function resetGame() {
+    // 重置游戏状态变量
+    isPlaying = false;
+    isPaused = false;
+    score = 0;
+    combo = 0;
+    maxCombo = 0;
+    accuracy = 100;
+    judgments = { perfect: 0, great: 0, good: 0, bad: 0, miss: 0 };
+    notes = [];
+    gameTime = 0;
+    startTime = null;
+    lastTime = 0;
     lastStatusUpdate = 0;
     judgmentDisplay = [];
     
-    // 延迟生成初始音符，先让界面渲染完成
-    setTimeout(() => {
-      if (isPlaying) { // 确保游戏仍然在进行中
-        generateNotes();
-      }
-    }, 100); // 100ms延迟，给浏览器时间渲染UI
+    // 重置生成模式相关变量
+    currentGenerationMode = null;
+    modeActivationTime = 0;
+    currentModeDuration = 0;
+    lastNoteGenTime = 0;
+  }
+  
+  // 开始游戏 - 进一步优化版本，减少启动时的性能开销
+  function startGame() {
+    // 重置游戏状态
+    resetGame();
     
-    // 初始化音频系统（异步但不阻塞游戏启动）
+    // 立即将isPlaying设为true，确保即使音频加载失败也能生成音符
+    isPlaying = true;
+    
+    // 分批次生成初始音符，避免一次性大量创建对象
+    setTimeout(() => {
+      // 先生成一小部分音符，让游戏快速开始
+      // 创建一个临时函数来生成少量初始音符
+      function generateInitialSmallBatch() {
+        notes = [];
+        
+        const now = performance.now();
+        let noteId = 0;
+        const laneNoteCount = new Array(laneCount).fill(0);
+        const smallBatchSize = Math.min(INITIAL_NOTES_COUNT, 4);
+        
+        // 初始化生成模式
+        if (!currentGenerationMode) {
+          currentGenerationMode = selectRandomGenerationMode();
+          modeActivationTime = now;
+          currentModeDuration = MODE_DURATION_MIN + Math.random() * (MODE_DURATION_MAX - MODE_DURATION_MIN);
+        }
+        
+        // 生成少量初始音符
+        for (let i = 0; i < smallBatchSize; i++) {
+          // 找到可用轨道
+          const availableLanes = [];
+          for (let j = 0; j < laneCount; j++) {
+            if (laneNoteCount[j] < MAX_NOTES_ON_LANE) {
+              availableLanes.push(j);
+            }
+          }
+          
+          if (availableLanes.length === 0) break;
+          
+          const lane = availableLanes[Math.floor(Math.random() * availableLanes.length)];
+          laneNoteCount[lane]++;
+          
+          let note = getNoteFromPool();
+          const spacing = calculateNoteSpacing();
+          const delay = 300 + Math.random() * 400;
+          const createdAt = now + (i * delay);
+          
+          if (!note) {
+            note = {
+              id: `note_${noteId++}`,
+              lane: lane,
+              position: -noteRadius * 2,
+              createdAt: createdAt,
+              spacing: spacing,
+              hit: false,
+              judgment: null,
+              _pool: false
+            };
+          } else {
+            note.id = `note_${noteId++}`;
+            note.lane = lane;
+            note.position = -noteRadius * 2;
+            note.createdAt = createdAt;
+            note.spacing = spacing;
+            note.hit = false;
+            note.judgment = null;
+          }
+          
+          notes.push(note);
+        }
+        
+        lastNoteGenTime = now;
+      }
+      
+      generateInitialSmallBatch();
+      
+      // 然后在后台继续生成剩余音符
+      setTimeout(() => {
+        generateAdditionalNotes(performance.now());
+      }, 300);
+    }, 50); // 减少延迟，让游戏更快启动
+    
+    // 初始化音频系统（完全异步，不阻塞任何游戏逻辑）
     if (gameConfig.audioEnabled) {
       loadAndPlayAudio().catch(error => {
         console.warn('音频加载失败，继续无音频模式:', error);
@@ -228,7 +415,8 @@
     startTime = performance.now();
     lastTime = startTime;
     
-    // 开始游戏循环
+    // 立即开始游戏循环，不依赖音频加载
+    requestAnimationFrame(gameLoop);
   }
   
   // 分离的音频加载函数，避免阻塞游戏启动
@@ -249,44 +437,37 @@
         audioManager.playBGM('game_music');
       }
     } catch (error) {
-      throw error;
+      console.warn('音频加载错误:', error);
+      // 不再抛出错误，避免阻止游戏循环
     }
-    isPlaying = true;
+    // 即使出错也继续，isPlaying已经在startGame中设置为true
     gameLoop();
   }
   
-  // 游戏主循环 - 优化版本，减少不必要的计算
+  // 游戏主循环 - 进一步优化版本，提高启动流畅度和响应性
   function gameLoop() {
     if (!isPlaying || isPaused) return;
     
-    const currentTime = performance.now(); // 使用更精确的performance.now()
+    const currentTime = performance.now();
     const deltaTime = currentTime - lastTime;
     gameTime = currentTime - startTime;
     
-    // 限制帧率，避免在性能较差设备上过度消耗资源
-    if (deltaTime < 16) { // 约60FPS
-      animationFrameId = requestAnimationFrame(gameLoop);
-      return;
-    }
-    
-    // 只在必要时更新游戏状态
-    const updateInterval = 30; // 每30ms更新一次游戏状态
-    if (deltaTime >= updateInterval) {
-      // 更新音符位置
+    // 优化帧率控制，使用requestAnimationFrame的天然帧率控制
+    if (deltaTime >= 16) { // 约60FPS更新频率
+      // 只更新活跃音符，避免不必要的计算
       updateNotes(deltaTime);
       
-      // 检查错过的音符和清理旧音符合并处理，减少遍历次数
+      // 检查错过的音符和清理旧音符
       checkMissedAndCleanupNotes();
       
-      // 动态生成新音符，确保音符持续出现（减少调用频率）
-      if (Math.random() > 0.3) { // 70%的概率生成新音符，减少调用频率
-        if (notes.length < 15) { // 进一步减少最大音符数量
-          generateAdditionalNotes(currentTime);
-        }
+      // 动态生成新音符
+      const activeNotes = notes.filter(note => !note.hit);
+      if (activeNotes.length < 20) {
+        generateAdditionalNotes(currentTime);
       }
       
-      // 更新游戏状态 - 减少更新频率
-      if (currentTime - lastStatusUpdate >= 100) { // 每100ms更新一次状态
+      // 降低状态更新频率，减少响应式开销，提高性能
+      if (currentTime - lastStatusUpdate >= 200) { // 每200ms更新一次状态
         updateGameStatus();
         lastStatusUpdate = currentTime;
       }
@@ -300,7 +481,7 @@
       lastTime = currentTime;
     }
     
-    // 请求下一帧
+    // 请求下一帧，确保流畅的动画
     animationFrameId = requestAnimationFrame(gameLoop);
   }
   
@@ -310,8 +491,8 @@
   function checkMissedAndCleanupNotes() {
     if (!gameArea) return;
     
-    const missThreshold = judgmentLinePosition + 150;
-    const cleanupThreshold = gameArea.offsetHeight + 100;
+    const missThreshold = judgmentLinePosition + 200; // 增加错过阈值，给玩家更多反应时间
+    const cleanupThreshold = gameArea.offsetHeight + 150; // 增加清理阈值，使音符在离开屏幕后稍作停留
     
     // 创建新数组而不是修改原数组，避免在遍历过程中修改数组
     const newNotes = [];
@@ -341,22 +522,173 @@
     notes = newNotes;
   }
   
-  // 动态生成额外的音符 - 优化版本，确保每行最多3个音符
+  // 动态生成额外的音符 - 优化版本，支持多种生成模式
   let nextNoteId = 1000; // 避免ID冲突
   let lastNoteGenTime = 0;
+  let currentModeDuration = 0;
+  
+  // 音符生成模式定义
+  const generationModes = {
+    // 模式1：随机分布 - 基础随机生成模式
+    random: {
+      name: 'random',
+      generate: function(currentTime, activeNotes, availableLanes) {
+        const noteCount = Math.floor(Math.random() * MAX_NOTES_PER_GENERATION) + 1;
+        const adjustedNoteCount = Math.min(noteCount, availableLanes.length);
+        
+        const lanesThisTime = new Set();
+        while (lanesThisTime.size < adjustedNoteCount) {
+          const randomIndex = Math.floor(Math.random() * availableLanes.length);
+          lanesThisTime.add(availableLanes[randomIndex]);
+        }
+        
+        return lanesThisTime;
+      }
+    },
+    
+    // 模式2：顺序生成 - 按轨道顺序依次生成音符
+    sequential: {
+      name: 'sequential',
+      lastLane: -1,
+      generate: function(currentTime, activeNotes, availableLanes) {
+        // 确保至少有一个音符
+        const noteCount = 1 + Math.floor(Math.random() * 2);
+        const lanesThisTime = new Set();
+        
+        // 按顺序选择轨道
+        for (let i = 0; i < noteCount && availableLanes.length > 0 && lanesThisTime.size < noteCount; i++) {
+          this.lastLane = (this.lastLane + 1) % laneCount;
+          if (availableLanes.includes(this.lastLane)) {
+            lanesThisTime.add(this.lastLane);
+          }
+        }
+        
+        // 如果没找到足够的轨道，随机补充
+        while (lanesThisTime.size < noteCount && availableLanes.length > 0) {
+          const randomIndex = Math.floor(Math.random() * availableLanes.length);
+          lanesThisTime.add(availableLanes[randomIndex]);
+        }
+        
+        return lanesThisTime;
+      }
+    },
+    
+    // 模式3：密集爆发 - 短时间内生成较多音符
+    burst: {
+      name: 'burst',
+      generate: function(currentTime, activeNotes, availableLanes) {
+        // 生成较多音符，但不超过可用轨道数
+        const noteCount = Math.min(2 + Math.floor(Math.random() * 2), availableLanes.length);
+        
+        // 随机选择轨道，但确保分散在不同轨道
+        const lanesThisTime = new Set();
+        while (lanesThisTime.size < noteCount && availableLanes.length > 0) {
+          const randomIndex = Math.floor(Math.random() * availableLanes.length);
+          lanesThisTime.add(availableLanes[randomIndex]);
+        }
+        
+        return lanesThisTime;
+      }
+    },
+    
+    // 模式4：交替模式 - 左右交替生成音符
+    alternate: {
+      name: 'alternate',
+      side: 0, // 0: 左, 1: 右
+      generate: function(currentTime, activeNotes, availableLanes) {
+        const mid = Math.floor(laneCount / 2);
+        let targetLanes;
+        
+        // 切换左右
+        this.side = (this.side + 1) % 2;
+        
+        if (this.side === 0) {
+          // 左侧轨道
+          targetLanes = availableLanes.filter(lane => lane < mid);
+        } else {
+          // 右侧轨道
+          targetLanes = availableLanes.filter(lane => lane >= mid);
+        }
+        
+        // 如果目标侧没有可用轨道，使用所有可用轨道
+        if (targetLanes.length === 0) {
+          targetLanes = availableLanes;
+        }
+        
+        // 生成1-2个音符
+        const noteCount = 1 + Math.floor(Math.random() * 2);
+        const adjustedNoteCount = Math.min(noteCount, targetLanes.length);
+        
+        const lanesThisTime = new Set();
+        while (lanesThisTime.size < adjustedNoteCount) {
+          const randomIndex = Math.floor(Math.random() * targetLanes.length);
+          lanesThisTime.add(targetLanes[randomIndex]);
+        }
+        
+        return lanesThisTime;
+      }
+    },
+    
+    // 模式5：同步生成 - 同时在多个相邻轨道生成音符
+    sync: {
+      name: 'sync',
+      generate: function(currentTime, activeNotes, availableLanes) {
+        // 随机选择起始轨道
+        if (availableLanes.length === 0) return new Set();
+        
+        const startLane = availableLanes[Math.floor(Math.random() * availableLanes.length)];
+        const lanesThisTime = new Set([startLane]);
+        
+        // 尝试添加相邻轨道
+        const directions = [-1, 1]; // 左右
+        const noteCount = 1 + Math.floor(Math.random() * 2);
+        
+        directions.forEach(dir => {
+          let currentLane = startLane + dir;
+          while (lanesThisTime.size < noteCount && currentLane >= 0 && currentLane < laneCount) {
+            if (availableLanes.includes(currentLane)) {
+              lanesThisTime.add(currentLane);
+              break;
+            }
+            currentLane += dir;
+          }
+        });
+        
+        return lanesThisTime;
+      }
+    }
+  };
+  
+  // 选择随机生成模式
+  function selectRandomGenerationMode() {
+    const modes = Object.keys(generationModes);
+    const modeName = modes[Math.floor(Math.random() * modes.length)];
+    return generationModes[modeName];
+  }
+  
+  // 实现音符间隔控制的工具函数
+  function calculateNoteSpacing() {
+    // 计算随机间隔，确保最小间隔
+    return NOTE_MIN_SPACING + Math.random() * NOTE_SPACING_VARIATION;
+  }
   
   function generateAdditionalNotes(currentTime) {
-    // 使用固定的生成间隔
+    // 使用固定的生成间隔，保持较短间隔以确保持续生成
     if (currentTime - lastNoteGenTime < NOTE_GENERATION_INTERVAL) return;
     
-    // 限制活跃音符数量，避免过度生成
+    // 限制活跃音符数量，但增加上限以支持3分钟游戏
     const activeNotes = notes.filter(note => !note.hit);
-    if (activeNotes.length >= 15) return; // 减少最大活跃音符数
+    if (activeNotes.length >= 30) return; // 增加最大活跃音符数
     
-    // 随机决定是否生成音符 - 降低生成概率以减少音符数量
-    if (Math.random() > 0.4) return;
+    // 检查是否需要切换生成模式
+    if (!currentGenerationMode || currentTime - modeActivationTime > currentModeDuration) {
+      currentGenerationMode = selectRandomGenerationMode();
+      modeActivationTime = currentTime;
+      currentModeDuration = MODE_DURATION_MIN + Math.random() * (MODE_DURATION_MAX - MODE_DURATION_MIN);
+      console.log(`切换到生成模式: ${currentGenerationMode.name}`);
+    }
     
-    // 确保同一轨道上的音符数量限制（每行最多3个音符）
+    // 确保同一轨道上的音符数量限制
     const laneCounts = new Array(laneCount).fill(0);
     activeNotes.forEach(note => {
       laneCounts[note.lane]++;
@@ -372,21 +704,19 @@
     
     if (availableLanes.length === 0) return;
     
-    // 确定生成数量 - 减少每次生成的音符数
-    const noteCount = Math.floor(Math.random() * MAX_NOTES_PER_GENERATION) + 1;
-    const adjustedNoteCount = Math.min(noteCount, availableLanes.length);
-    
-    const lanesThisTime = new Set();
-    
-    // 从可用轨道中随机选择
-    while (lanesThisTime.size < adjustedNoteCount) {
-      const randomIndex = Math.floor(Math.random() * availableLanes.length);
-      lanesThisTime.add(availableLanes[randomIndex]);
-    }
+    // 使用当前激活的生成模式来确定生成哪些轨道的音符
+    const lanesThisTime = currentGenerationMode.generate(currentTime, activeNotes, availableLanes);
     
     // 从对象池获取音符或创建新音符
+    let lastCreatedAt = currentTime;
     lanesThisTime.forEach(lane => {
       let note = getNoteFromPool();
+      
+      // 计算音符之间的间隔，确保不会太密集
+      const spacing = calculateNoteSpacing();
+      // 减少基础延迟，确保音符生成更频繁
+      const delay = 300 + (Math.random() * 400); // 从1000+500改为300+400，显著增加生成频率
+      lastCreatedAt += delay;
       
       if (!note) {
         // 如果对象池为空，创建新对象
@@ -394,7 +724,8 @@
           id: `note_${nextNoteId++}`,
           lane: lane,
           position: -noteRadius * 2,
-          createdAt: currentTime + 800,
+          createdAt: lastCreatedAt,
+          spacing: spacing,
           hit: false,
           judgment: null,
           _pool: false
@@ -404,7 +735,8 @@
         note.id = `note_${nextNoteId++}`;
         note.lane = lane;
         note.position = -noteRadius * 2;
-        note.createdAt = currentTime + 800;
+        note.createdAt = lastCreatedAt;
+        note.spacing = spacing;
       }
       
       notes.push(note);
@@ -417,12 +749,12 @@
   
   // 已被checkMissedAndCleanupNotes替代
   
-  // 更新音符位置 - 优化版本
+  // 更新音符位置 - 优化版本，降低速度以延长掉落时间
   function updateNotes(deltaTime) {
     const currentTime = Date.now();
     
-    // 计算基于deltaTime的移动距离，确保平滑滚动
-    const basePositionDelta = (noteSpeed / 10) * (deltaTime / 16) * 3;
+    // 计算基于deltaTime的移动距离，降低速度系数以延长音符掉落时间
+    const basePositionDelta = (noteSpeed / 10) * (deltaTime / 16) * 1.2; // 从3降低到1.2，显著减慢速度
     
     // 只更新活跃音符，避免不必要的计算
     const activeNotes = notes.filter(note => !note.hit && currentTime >= note.createdAt);
@@ -736,19 +1068,65 @@
     }
   }
   
-  // 处理轨道触摸 - 修复参数类型错误，统一调用handleNoteHit
+  // 处理轨道触摸 - 支持多点触控的改进版本
   function handleLaneTouch(laneIndex) {
     if (!isPlaying || isPaused) return;
     
-    // 直接调用handleNoteHit，传入轨道索引而不是音符对象
-    // 这样可以复用同一个判定逻辑，避免重复代码和参数不匹配的问题
+    // 直接调用handleNoteHit，传入轨道索引
     handleNoteHit(laneIndex);
+  }
+  
+  // 跟踪当前活动的触摸点
+  let activeTouches = new Set();
+  
+  // 处理触摸开始事件，支持多点触控
+  function handleTouchStart(event, laneIndex) {
+    if (!isPlaying || isPaused) return;
+    
+    // 阻止事件冒泡和默认行为
+    event.preventDefault();
+    event.stopPropagation();
+    
+    // 为每个触摸点单独处理
+    const touches = event.touches || [event];
+    for (let i = 0; i < touches.length; i++) {
+      const touch = touches[i];
+      const touchId = touch.identifier !== undefined ? touch.identifier : Math.random();
+      
+      // 只处理新的触摸点
+      if (!activeTouches.has(touchId)) {
+        activeTouches.add(touchId);
+        handleNoteHit(laneIndex);
+        
+        // 触发触摸反馈动画
+        const touchElement = event.currentTarget;
+        const feedback = touchElement.querySelector('.touch-feedback');
+        if (feedback) {
+          feedback.style.opacity = '0.3';
+          setTimeout(() => {
+            feedback.style.opacity = '0';
+          }, 200);
+        }
+      }
+    }
+  }
+  
+  // 处理触摸结束事件，清理活动触摸点
+  function handleTouchEnd(event) {
+    const changedTouches = event.changedTouches || [event];
+    for (let i = 0; i < changedTouches.length; i++) {
+      const touchId = changedTouches[i].identifier !== undefined ? 
+                      changedTouches[i].identifier : Math.random();
+      activeTouches.delete(touchId);
+    }
   }
   
   // 处理游戏区域的键盘松开事件
   function handleKeyUp(event) {
     // 可以在这里添加键盘松开时的逻辑
   }
+  
+  // 移除重复的gameLoop函数声明，优化已在原始函数中应用
   
   // 获取当前游戏时间格式
   function getFormattedTime(time) {
@@ -861,17 +1239,21 @@
       {/if}
     {/each}
     
-    <!-- 触摸区域 -->
+    <!-- 触摸区域 - 支持多点触控 -->
     <div class="touch-areas">
       {#each Array(laneCount) as _, i}
         <div 
           class="touch-area" 
           style="width: calc(100% / {laneCount});"
           on:click={() => handleLaneTouch(i)}
-            on:keydown={(e) => handleTouchKeyDown(e, i)}
+          on:keydown={(e) => handleTouchKeyDown(e, i)}
+          on:touchstart={(e) => handleTouchStart(e, i)}
+          on:touchend={handleTouchEnd}
+          on:touchcancel={handleTouchEnd}
           role="button" 
           aria-label={`轨道${i + 1}触摸区域`}
           tabindex="0"
+          touch-action="none"
         >
           <div class="touch-feedback"></div>
           <div class="key-hint">{['D', 'F', 'J', 'K'][i] || (i + 1)}</div>
@@ -1142,7 +1524,7 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: 100px;
+    height: 180px;
     display: flex;
     z-index: 5;
   }
@@ -1155,12 +1537,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.2);
   }
   
-  .touch-area:active {
-    background: rgba(255, 255, 255, 0.1);
-  }
-  
+  /* 移除:active伪类，使用JS控制反馈以支持多点触控 */
   .touch-feedback {
     position: absolute;
     width: 100%;
@@ -1171,8 +1551,12 @@
     transition: opacity 0.1s ease;
   }
   
-  .touch-area:active .touch-feedback {
-    opacity: 0.3;
+  /* 增强触摸区域的样式，使其更易于识别 */
+  .touch-area {
+    transition: background-color 0.1s ease;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
   }
   
   .key-hint {
