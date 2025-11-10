@@ -26,6 +26,13 @@
   let startTime = null;
   let lastTime = 0;
   
+  // 游戏配置参数
+  const NOTE_GENERATION_INTERVAL = 400; // 音符生成间隔
+  const NOTE_SPACING = 200; // 音符间距
+  const MAX_NOTES_PER_GENERATION = 2; // 每次生成的最大音符数 - 降低以减少卡顿
+  const MAX_NOTES_ON_LANE = 3; // 同一轨道最多音符数
+  const INITIAL_NOTES_COUNT = 5; // 初始生成的音符数量 - 减少以提高启动性能
+  
   // 游戏区域引用
   let gameContainer;
   let gameArea;
@@ -35,7 +42,9 @@
   $: laneCount = gameConfig.laneCount || 4;
   $: noteSpeed = gameConfig.speed || 10;
   $: noteRadius = gameConfig.noteRadius || 20;
-  
+  $: judgmentLinePosition = gameArea ? gameArea.offsetHeight * 0.8 : 0;
+  $: hitRange = judgmentThresholds.bad * 2; // 统一的命中范围
+
   // 判定阈值（毫秒） - 降低难度，增大判定窗口
   const judgmentThresholds = {
     perfect: 80,  // 增大完美判定窗口
@@ -110,256 +119,386 @@
     gameArea.style.height = containerHeight * 0.7 + 'px';
     
     // 设置判定线位置
-    const judgmentLineY = gameArea.offsetHeight * 0.8;
-    judgmentLine.style.top = judgmentLineY + 'px';
+    judgmentLine.style.top = judgmentLinePosition + 'px';
   }
   
-  // 生成音符 - 基于时间的音符生成系统
+  // 生成音符 - 优化版本
   function generateNotes() {
-    console.log('生成游戏音符...');
     notes = [];
     
     // 基于时间生成音符，确保每个音符都有createdAt属性
-    const now = Date.now();
+    const now = performance.now();
     let noteId = 0;
     
-    // 首先生成一些立即可见的音符，确保游戏开始就能看到效果
-    for (let i = 0; i < laneCount; i++) {
-      for (let j = 0; j < 2; j++) {
-        const note = {
-          id: `note_${noteId++}`,
-          lane: i,
-          position: 50 + j * 150, // 初始位置在屏幕上方
-          createdAt: now - (j * 500), // 为立即可见的音符设置过去的时间
-          hit: false,
-          judgment: null
-        };
-        notes.push(note);
-      }
-    }
+    // 跟踪每个轨道上的音符数量
+    const laneNoteCount = new Array(laneCount).fill(0);
     
-    // 然后生成未来会出现的音符，形成连续的音符流
-    for (let timeOffset = 1000; timeOffset < 10000; timeOffset += 300) {
-      // 每个时间点随机选择1-2个轨道生成音符
-      const lanesThisTime = [];
-      const noteCountThisTime = Math.floor(Math.random() * 2) + 1;
+    // 生成初始音符 - 减少初始音符数量以提高启动性能
+    const noteCount = INITIAL_NOTES_COUNT;
+    
+    for (let i = 0; i < noteCount; i++) {
+      // 尝试找到一个符合限制的轨道（每行最多3个音符）
+      let lane;
+      let attempts = 0;
+      const maxAttempts = 10;
       
-      while (lanesThisTime.length < noteCountThisTime) {
-        const randomLane = Math.floor(Math.random() * laneCount);
-        if (!lanesThisTime.includes(randomLane)) {
-          lanesThisTime.push(randomLane);
+      while (attempts < maxAttempts) {
+        lane = Math.floor(Math.random() * laneCount);
+        if (laneNoteCount[lane] < MAX_NOTES_ON_LANE) {
+          break;
         }
+        attempts++;
       }
       
-      lanesThisTime.forEach(lane => {
-        const note = {
+      // 增加该轨道的音符计数
+      laneNoteCount[lane]++;
+      
+      // 从对象池获取音符或创建新音符
+      let note = getNoteFromPool();
+      
+      if (!note) {
+        // 如果对象池为空，创建新对象
+        note = {
           id: `note_${noteId++}`,
           lane: lane,
-          position: -noteRadius * 2, // 从屏幕顶部外开始
-          createdAt: now + timeOffset, // 设置未来的创建时间
+          position: -noteRadius * 2,
+          createdAt: now + i * 500,
           hit: false,
-          judgment: null
+          judgment: null,
+          _pool: false
         };
-        notes.push(note);
+      } else {
+        // 重用对象，更新属性
+        note.id = `note_${noteId++}`;
+        note.lane = lane;
+        note.position = -noteRadius * 2;
+        note.createdAt = now + i * 500;
+      }
+      
+      notes.push(note);
+    }
+  }
+  
+  // 对象池优化 - 减少对象创建和垃圾回收
+  let noteObjectPool = [];
+  const MAX_POOL_SIZE = 50;
+  
+  // 从对象池获取音符对象
+  function getNoteFromPool() {
+    if (noteObjectPool.length > 0) {
+      const note = noteObjectPool.pop();
+      // 重置属性
+      note.hit = false;
+      note.judgment = null;
+      note._pool = false;
+      return note;
+    }
+    return null;
+  }
+  
+  // 回收音符对象到对象池
+  function returnNoteToPool(note) {
+    if (noteObjectPool.length < MAX_POOL_SIZE && !note._pool) {
+      note._pool = true;
+      noteObjectPool.push(note);
+    }
+  }
+  
+  // 开始游戏 - 优化版本，减少启动时的性能开销
+  async function startGame() {
+    // 初始化游戏状态
+    lastStatusUpdate = 0;
+    judgmentDisplay = [];
+    
+    // 延迟生成初始音符，先让界面渲染完成
+    setTimeout(() => {
+      if (isPlaying) { // 确保游戏仍然在进行中
+        generateNotes();
+      }
+    }, 100); // 100ms延迟，给浏览器时间渲染UI
+    
+    // 初始化音频系统（异步但不阻塞游戏启动）
+    if (gameConfig.audioEnabled) {
+      loadAndPlayAudio().catch(error => {
+        console.warn('音频加载失败，继续无音频模式:', error);
       });
     }
     
-    console.log('音符生成完成，总数:', notes.length);
-  }
-  
-  // 开始游戏
-  async function startGame() {
-    // 初始化音频系统
-    try {
-      // 停止主菜单音乐（如果正在播放）
-      audioManager.stopBGM();
-      
-      // 加载并播放游戏背景音乐
-      if (gameConfig.audioEnabled) {
-        if (song && song.audioUrl) {
-          // 使用歌曲自带的音频
-          await audioManager.loadBGM('game_music', song.audioUrl);
-        } else {
-          // 使用默认游戏背景音乐
-          await audioManager.loadBGM('game_music', 'https://example.com/game_music.mp3');
-        }
-        
-        if (gameConfig.audioEnabled) {
-          audioManager.playBGM('game_music');
-          console.log('成功播放游戏音乐');
-        }
-      }
-    } catch (error) {
-      console.warn('音频加载失败，使用模拟模式:', error);
-    }
-    
-    // 设置开始时间
-    startTime = Date.now();
+    // 设置开始时间，使用performance.now()获得更高精度
+    startTime = performance.now();
     lastTime = startTime;
     
     // 开始游戏循环
+  }
+  
+  // 分离的音频加载函数，避免阻塞游戏启动
+  async function loadAndPlayAudio() {
+    // 停止主菜单音乐（如果正在播放）
+    audioManager.stopBGM();
+    
+    try {
+      if (song && song.audioUrl) {
+        // 使用歌曲自带的音频
+        await audioManager.loadBGM('game_music', song.audioUrl);
+      } else {
+        // 使用默认游戏背景音乐
+        await audioManager.loadBGM('game_music', 'https://example.com/game_music.mp3');
+      }
+      
+      if (gameConfig.audioEnabled) {
+        audioManager.playBGM('game_music');
+      }
+    } catch (error) {
+      throw error;
+    }
     isPlaying = true;
     gameLoop();
   }
   
-  // 游戏主循环
+  // 游戏主循环 - 优化版本，减少不必要的计算
   function gameLoop() {
     if (!isPlaying || isPaused) return;
     
-    const currentTime = Date.now();
+    const currentTime = performance.now(); // 使用更精确的performance.now()
     const deltaTime = currentTime - lastTime;
     gameTime = currentTime - startTime;
     
-    // 动态生成新音符，确保音符持续出现
-    if (notes.length < 50) { // 限制最大音符数量，避免内存问题
-      generateAdditionalNotes(currentTime);
-    }
-    
-    // 更新音符位置
-    updateNotes(deltaTime);
-    
-    // 检查错过的音符
-    checkMissedNotes();
-    
-    // 更新游戏状态
-    updateGameStatus();
-    
-    // 清理已离开屏幕的音符
-    cleanupOldNotes();
-    
-    // 检查游戏是否结束
-    if (gameTime >= gameDuration * 1000) {
-      endGame();
+    // 限制帧率，避免在性能较差设备上过度消耗资源
+    if (deltaTime < 16) { // 约60FPS
+      animationFrameId = requestAnimationFrame(gameLoop);
       return;
     }
     
-    lastTime = currentTime;
+    // 只在必要时更新游戏状态
+    const updateInterval = 30; // 每30ms更新一次游戏状态
+    if (deltaTime >= updateInterval) {
+      // 更新音符位置
+      updateNotes(deltaTime);
+      
+      // 检查错过的音符和清理旧音符合并处理，减少遍历次数
+      checkMissedAndCleanupNotes();
+      
+      // 动态生成新音符，确保音符持续出现（减少调用频率）
+      if (Math.random() > 0.3) { // 70%的概率生成新音符，减少调用频率
+        if (notes.length < 15) { // 进一步减少最大音符数量
+          generateAdditionalNotes(currentTime);
+        }
+      }
+      
+      // 更新游戏状态 - 减少更新频率
+      if (currentTime - lastStatusUpdate >= 100) { // 每100ms更新一次状态
+        updateGameStatus();
+        lastStatusUpdate = currentTime;
+      }
+      
+      // 检查游戏是否结束
+      if (gameTime >= gameDuration * 1000) {
+        endGame();
+        return;
+      }
+      
+      lastTime = currentTime;
+    }
+    
+    // 请求下一帧
     animationFrameId = requestAnimationFrame(gameLoop);
   }
   
-  // 动态生成额外的音符
+  let lastStatusUpdate = 0; // 用于限制状态更新频率
+  
+  // 合并检查错过的音符和清理旧音符，减少遍历次数 - 优化版本
+  function checkMissedAndCleanupNotes() {
+    if (!gameArea) return;
+    
+    const missThreshold = judgmentLinePosition + 150;
+    const cleanupThreshold = gameArea.offsetHeight + 100;
+    
+    // 创建新数组而不是修改原数组，避免在遍历过程中修改数组
+    const newNotes = [];
+    
+    for (const note of notes) {
+      if (!note.hit) {
+        // 检查是否错过
+        if (note.createdAt && note.position > missThreshold) {
+          handleMiss(note);
+          // 回收错过的音符到对象池
+          returnNoteToPool(note);
+        } else if (note.position <= cleanupThreshold) {
+          newNotes.push(note); // 保留未清理的音符
+        } else {
+          // 回收离开屏幕的音符到对象池
+          returnNoteToPool(note);
+        }
+      } else if (note.position <= cleanupThreshold) {
+        newNotes.push(note); // 保留已击中但未离开屏幕的音符
+      } else {
+        // 回收已击中且离开屏幕的音符到对象池
+        returnNoteToPool(note);
+      }
+    }
+    
+    // 一次性更新数组，减少响应式更新次数
+    notes = newNotes;
+  }
+  
+  // 动态生成额外的音符 - 优化版本，确保每行最多3个音符
   let nextNoteId = 1000; // 避免ID冲突
+  let lastNoteGenTime = 0;
+  
   function generateAdditionalNotes(currentTime) {
-    // 随机决定是否生成新音符
-    if (Math.random() > 0.3) return; // 70%概率不生成
+    // 使用固定的生成间隔
+    if (currentTime - lastNoteGenTime < NOTE_GENERATION_INTERVAL) return;
     
-    // 随机选择1个轨道生成音符
-    const randomLane = Math.floor(Math.random() * laneCount);
+    // 限制活跃音符数量，避免过度生成
+    const activeNotes = notes.filter(note => !note.hit);
+    if (activeNotes.length >= 15) return; // 减少最大活跃音符数
     
-    const note = {
-      id: `note_${nextNoteId++}`,
-      lane: randomLane,
-      position: -noteRadius * 2, // 从屏幕顶部外开始
-      createdAt: currentTime + 1000, // 1秒后出现
-      hit: false,
-      judgment: null
-    };
+    // 随机决定是否生成音符 - 降低生成概率以减少音符数量
+    if (Math.random() > 0.4) return;
     
-    notes.push(note);
+    // 确保同一轨道上的音符数量限制（每行最多3个音符）
+    const laneCounts = new Array(laneCount).fill(0);
+    activeNotes.forEach(note => {
+      laneCounts[note.lane]++;
+    });
+    
+    // 找到可用的轨道（未满的）
+    const availableLanes = [];
+    for (let i = 0; i < laneCount; i++) {
+      if (laneCounts[i] < MAX_NOTES_ON_LANE) {
+        availableLanes.push(i);
+      }
+    }
+    
+    if (availableLanes.length === 0) return;
+    
+    // 确定生成数量 - 减少每次生成的音符数
+    const noteCount = Math.floor(Math.random() * MAX_NOTES_PER_GENERATION) + 1;
+    const adjustedNoteCount = Math.min(noteCount, availableLanes.length);
+    
+    const lanesThisTime = new Set();
+    
+    // 从可用轨道中随机选择
+    while (lanesThisTime.size < adjustedNoteCount) {
+      const randomIndex = Math.floor(Math.random() * availableLanes.length);
+      lanesThisTime.add(availableLanes[randomIndex]);
+    }
+    
+    // 从对象池获取音符或创建新音符
+    lanesThisTime.forEach(lane => {
+      let note = getNoteFromPool();
+      
+      if (!note) {
+        // 如果对象池为空，创建新对象
+        note = {
+          id: `note_${nextNoteId++}`,
+          lane: lane,
+          position: -noteRadius * 2,
+          createdAt: currentTime + 800,
+          hit: false,
+          judgment: null,
+          _pool: false
+        };
+      } else {
+        // 重用对象，更新属性
+        note.id = `note_${nextNoteId++}`;
+        note.lane = lane;
+        note.position = -noteRadius * 2;
+        note.createdAt = currentTime + 800;
+      }
+      
+      notes.push(note);
+    });
+    
+    lastNoteGenTime = currentTime;
   }
   
-  // 清理离开屏幕的旧音符
-  function cleanupOldNotes() {
-    const gameAreaHeight = gameArea.offsetHeight || 600;
-    const cleanupThreshold = gameAreaHeight + 100; // 屏幕底部下方
-    
-    // 过滤掉已经离开屏幕且未被击中的音符
-    notes = notes.filter(note => 
-      !note.hit || note.position <= cleanupThreshold
-    );
-  }
+  // 移除难度变化相关功能，简化游戏逻辑
   
-  // 更新音符位置 - 基于时间差的精确计算
+  // 已被checkMissedAndCleanupNotes替代
+  
+  // 更新音符位置 - 优化版本
   function updateNotes(deltaTime) {
     const currentTime = Date.now();
-    const gameAreaHeight = gameArea.offsetHeight || 600;
     
-    notes.forEach(note => {
-      // 只有当音符应该已经创建并且未被击中时才更新位置
-      if (!note.hit && currentTime >= note.createdAt) {
-        // 计算音符已经存在的时间
-        const noteAge = currentTime - note.createdAt;
-        
-        // 根据速度和存在时间计算位置
-        // 这里使用noteSpeed * (deltaTime / 16)来确保不同帧率下速度一致
-        const speedMultiplier = noteSpeed / 10; // 调整速度比例
-        note.position += speedMultiplier * (deltaTime / 16) * 3;
-        
-        // 确保音符在创建时从正确位置开始
-        if (note.position < -noteRadius * 2) {
-          note.position = -noteRadius * 2;
-        }
+    // 计算基于deltaTime的移动距离，确保平滑滚动
+    const basePositionDelta = (noteSpeed / 10) * (deltaTime / 16) * 3;
+    
+    // 只更新活跃音符，避免不必要的计算
+    const activeNotes = notes.filter(note => !note.hit && currentTime >= note.createdAt);
+    
+    activeNotes.forEach(note => {
+      // 更新音符位置
+      note.position += basePositionDelta;
+      
+      // 确保音符在创建时从正确位置开始
+      if (note.position < -noteRadius * 2) {
+        note.position = -noteRadius * 2;
       }
     });
   }
   
   // 检查错过的音符
   function checkMissedNotes() {
-    const gameAreaHeight = gameArea.offsetHeight || 600;
-    const missThreshold = gameAreaHeight + 50; // 屏幕底部下方一点
+    if (!gameArea) return;
     
-    notes.forEach(note => {
-      // 检查是否应该已经创建、未被击中且超过了错过阈值
-      if (note.createdAt && !note.hit && note.position > missThreshold) {
-        handleMiss(note);
-      }
-    });
+    const missThreshold = judgmentLinePosition + 150; // 基于判定线位置的动态阈值
+    
+    // 性能优化：使用filter而不是forEach，避免重复遍历
+    const notesToMiss = notes.filter(note => 
+      note.createdAt && !note.hit && note.position > missThreshold
+    );
+    
+    // 批量处理错过的音符
+    notesToMiss.forEach(note => handleMiss(note));
   }
   
-  // 处理音符点击
+  // 处理音符点击 - 统一的判定逻辑
   function handleNoteHit(lane) {
-    if (!isPlaying || isPaused) return;
-    
-    const gameAreaHeight = gameArea.offsetHeight || 600;
-    const judgmentLineY = gameAreaHeight * 0.8;
+    if (!isPlaying || isPaused || !gameArea) return;
     
     // 找到该轨道上未击中且在合理范围内的音符
     const currentTime = Date.now();
     const laneNotes = notes.filter(
       note => note.lane === lane && note.createdAt && !note.hit && 
              currentTime >= note.createdAt && // 只考虑已经创建的音符
-             note.position < judgmentLineY + 100 // 只考虑在判定线附近的音符
+             Math.abs(note.position - judgmentLinePosition) < hitRange // 只考虑在判定范围内的音符
     );
     
     if (laneNotes.length === 0) {
-      // 如果没有可击中的音符，播放miss音效
-      if (audioManager && gameConfig.sfxEnabled) {
-        audioManager.playSoundEffect('miss');
-      }
+      // 如果没有可击中的音符，不做处理，避免错误的miss判定
       return;
     }
     
     // 按位置排序，找到最接近判定线的音符
-    laneNotes.sort((a, b) => Math.abs(a.position - judgmentLineY) - Math.abs(b.position - judgmentLineY));
+    laneNotes.sort((a, b) => 
+      Math.abs(a.position - judgmentLinePosition) - 
+      Math.abs(b.position - judgmentLinePosition)
+    );
     const targetNote = laneNotes[0];
     
-    const distance = Math.abs(targetNote.position - judgmentLineY);
+    const distance = Math.abs(targetNote.position - judgmentLinePosition);
     
-    // 判断是否在可击中范围内（扩大范围以提高可命中性）
-    if (distance < judgmentThresholds.bad + 80) {
-      const judgment = calculateJudgment(distance);
-      registerHit(targetNote, judgment);
-      
-      // 播放击中音效
-      if (audioManager && gameConfig.sfxEnabled) {
-        // 根据判定类型播放不同音效
-        const soundName = `hit_${judgment}`;
-        audioManager.playSoundEffect(soundName);
-      }
-    } else {
-      // 在范围内但距离太远，算miss
-      handleMiss(targetNote);
+    // 改进的判定逻辑，确保在范围内的音符都能得到正确判定
+    const judgment = calculateJudgment(distance);
+    registerHit(targetNote, judgment);
+    
+    // 播放击中音效
+    if (audioManager && gameConfig.sfxEnabled) {
+      // 根据判定类型播放不同音效
+      const soundName = judgment === 'miss' ? 'miss' : `hit_${judgment}`;
+      audioManager.playSoundEffect(soundName);
     }
   }
   
-  // 计算判定结果
+  // 计算判定结果 - 基于像素距离的精确判定
   function calculateJudgment(distance) {
-    // 调整判定阈值，使游戏更容易上手
+    // 调整判定阈值，使用像素距离而不是时间，更准确反映视觉位置
     const adjustedThresholds = {
-      perfect: judgmentThresholds.perfect * 3, // 扩大perfect判定范围
-      great: judgmentThresholds.great * 2.5,
-      good: judgmentThresholds.good * 2,
-      bad: judgmentThresholds.bad * 1.5
+      perfect: noteRadius * 1.5,  // 完美判定：半径1.5倍内
+      great: noteRadius * 3,      // 良好判定：半径3倍内
+      good: noteRadius * 5,       // 一般判定：半径5倍内
+      bad: noteRadius * 7         // 可接受判定：半径7倍内
     };
     
     if (distance <= adjustedThresholds.perfect) return 'perfect';
@@ -369,17 +508,13 @@
     return 'miss';
   }
   
-  // 注册击中
+  // 注册击中 - 优化内存管理和对象回收
   function registerHit(note, judgment) {
     note.hit = true;
     note.judgment = judgment;
-    note.className = 'hit'; // 添加hit类以触发动画
     
     // 更新判定统计
-    if (!judgments[judgment]) {
-      judgments[judgment] = 0;
-    }
-    judgments[judgment]++;
+    judgments[judgment] = (judgments[judgment] || 0) + 1;
     
     // 更新分数
     const baseScore = scoreValues[judgment];
@@ -398,13 +533,8 @@
     // 显示判定结果
     showJudgment(judgment, note.lane);
     
-    // 清理已击中的音符，避免DOM过多
-    setTimeout(() => {
-      const index = notes.findIndex(n => n.id === note.id);
-      if (index !== -1) {
-        notes.splice(index, 1);
-      }
-    }, 300);
+    // 标记为待回收，由checkMissedAndCleanupNotes统一处理
+    note._toBeRemoved = true;
   }
   
   // 处理错过
@@ -420,32 +550,50 @@
     showJudgment('miss', note.lane);
   }
   
-  // 显示判定结果
+  // 显示判定结果 - 使用响应式数组而不是直接DOM操作
+  let judgmentDisplay = [];
+  
   function showJudgment(judgment, lane) {
-    const judgmentLineY = gameArea.offsetHeight * 0.8;
+    if (!gameArea) return;
+    
     const laneWidth = gameArea.offsetWidth / laneCount;
     const x = lane * laneWidth + laneWidth / 2;
-    const y = judgmentLineY;
     
-    // 创建判定结果元素
-    const judgmentEl = document.createElement('div');
-    judgmentEl.className = `judgment ${judgment}`;
-    judgmentEl.textContent = judgment === 'perfect' ? 'PERFECT!' :
-                          judgment === 'great' ? 'GREAT!' :
-                          judgment === 'good' ? 'GOOD' :
-                          judgment === 'bad' ? 'BAD' : 'MISS';
-    judgmentEl.style.left = `${x}px`;
-    judgmentEl.style.top = `${y}px`;
-    judgmentEl.style.transform = 'translate(-50%, -50%)';
+    // 创建判定显示对象
+    const judgmentId = Date.now() + Math.random();
+    judgmentDisplay.push({
+      id: judgmentId,
+      judgment,
+      x,
+      y: judgmentLinePosition,
+      text: judgment === 'perfect' ? 'PERFECT!' :
+           judgment === 'great' ? 'GREAT!' :
+           judgment === 'good' ? 'GOOD' :
+           judgment === 'bad' ? 'BAD' : 'MISS',
+      opacity: 1
+    });
     
-    gameArea.appendChild(judgmentEl);
-    
-    // 动画结束后移除
-    setTimeout(() => {
-      if (gameArea.contains(judgmentEl)) {
-        gameArea.removeChild(judgmentEl);
-      }
-    }, 600);
+    // 使用requestAnimationFrame执行动画，避免阻塞主线程
+    requestAnimationFrame(() => {
+      // 淡入淡出动画
+      let opacity = 1;
+      const fadeInterval = setInterval(() => {
+        opacity -= 0.1;
+        
+        const index = judgmentDisplay.findIndex(j => j.id === judgmentId);
+        if (index !== -1) {
+          judgmentDisplay[index].opacity = opacity;
+          
+          if (opacity <= 0) {
+            // 一次性移除，减少响应式更新次数
+            judgmentDisplay = judgmentDisplay.filter(j => j.id !== judgmentId);
+            clearInterval(fadeInterval);
+          }
+        } else {
+          clearInterval(fadeInterval);
+        }
+      }, 60);
+    });
   }
   
   // 更新游戏状态
@@ -507,12 +655,12 @@
     if (gameConfig.audioEnabled) {
       if (finalAccuracy >= 70) {
         // 播放胜利音乐
-        audioManager.loadBGM('victory_music', 'https://example.com/victory_music.mp3').then(() => {
+        audioManager.loadBGM('victory_music', '../Musics/Rainbow - Sia.mp3').then(() => {
           audioManager.playBGM('victory_music');
         });
       } else {
         // 播放失败音乐
-        audioManager.loadBGM('defeat_music', 'https://example.com/defeat_music.mp3').then(() => {
+        audioManager.loadBGM('defeat_music', '../Musics/Rainbow - Sia.mp3').then(() => {
           audioManager.playBGM('defeat_music');
         });
       }
@@ -588,26 +736,13 @@
     }
   }
   
-  // 处理轨道触摸
+  // 处理轨道触摸 - 修复参数类型错误，统一调用handleNoteHit
   function handleLaneTouch(laneIndex) {
     if (!isPlaying || isPaused) return;
     
-    // 查找该轨道上最接近判定线的未击中音符
-    const laneNotes = notes.filter(note => note.lane === laneIndex && !note.hit);
-    if (laneNotes.length === 0) return;
-    
-    // 按位置排序，找出最接近判定线的音符
-    laneNotes.sort((a, b) => Math.abs(a.position - judgmentLinePosition) - Math.abs(b.position - judgmentLinePosition));
-    const closestNote = laneNotes[0];
-    
-    // 检查是否在可命中范围内
-    const distance = Math.abs(closestNote.position - judgmentLinePosition);
-    if (distance <= hitRange) {
-      handleNoteHit(closestNote);
-    } else if (closestNote.position > judgmentLinePosition) {
-      // 如果音符已经超过判定线，则判定为miss
-      registerHit(closestNote, 'miss');
-    }
+    // 直接调用handleNoteHit，传入轨道索引而不是音符对象
+    // 这样可以复用同一个判定逻辑，避免重复代码和参数不匹配的问题
+    handleNoteHit(laneIndex);
   }
   
   // 处理游戏区域的键盘松开事件
@@ -631,6 +766,29 @@
       <button class="exit-button" on:click={() => dispatch('exit')}>退出游戏</button>
     </div>
   {/if}
+  
+  <!-- 判定结果显示区域 - 使用Svelte响应式渲染替代手动DOM操作 -->
+  {#each judgmentDisplay as display}
+    <div 
+      class={`judgment ${display.judgment}`}
+      style={`
+        left: ${display.x}px;
+        top: ${display.y}px;
+        opacity: ${display.opacity};
+        transform: translate(-50%, -50%);
+        position: absolute;
+        pointer-events: none;
+        z-index: 1000;
+        font-weight: bold;
+        font-size: 24px;
+        animation: judgmentFloat 0.6s ease-out;
+      `}
+    >
+      {display.text}
+    </div>
+  {/each}
+  
+  <!-- 移除难度变化显示 -->
   
   <!-- 游戏信息区域 -->
   <div class="game-info">
@@ -965,6 +1123,8 @@
     color: #888;
     text-shadow: 0 0 10px #888;
   }
+  
+  /* 移除难度变化通知样式 */
   
   @keyframes judgmentFloat {
     0% {

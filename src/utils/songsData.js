@@ -12,7 +12,7 @@ export const songs = [
     duration: 120, // 秒
     bpm: 120,
     coverUrl: 'https://via.placeholder.com/200?text=Electronic+Beat',
-    audioUrl: '', // 实际项目中需要提供真实的音频文件URL
+    audioUrl: '../Musics/Faded - Alan Walker&Iselin Solheim.mp3', // 主界面背景音乐
     description: '一首充满活力的电子音乐，适合初学者',
     difficulty: {
       easy: true,
@@ -35,7 +35,7 @@ export const songs = [
     duration: 150,
     bpm: 140,
     coverUrl: 'https://via.placeholder.com/200?text=Rock+Journey',
-    audioUrl: '',
+    audioUrl: '../Musics/Rainbow - Sia.mp3',
     description: '激情四射的摇滚歌曲，适合中级玩家',
     difficulty: {
       easy: true,
@@ -57,7 +57,7 @@ export const songs = [
     duration: 180,
     bpm: 100,
     coverUrl: 'https://via.placeholder.com/200?text=Jazz+Mood',
-    audioUrl: '',
+    audioUrl: '../Musics/Faded - Alan Walker&Iselin Solheim.mp3',
     description: '优雅的爵士乐，考验节奏感',
     difficulty: {
       easy: false,

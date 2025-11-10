@@ -27,8 +27,8 @@
     
     // 加载并播放主界面背景音乐
     if (gameConfig.audioEnabled && audioManager && typeof audioManager.loadBGM === 'function') {
-      // 使用模拟的音乐URL，实际项目中需要替换为真实的音频文件
-      audioManager.loadBGM('main_menu', 'https://example.com/main_menu.mp3').then(() => {
+      // 使用Musics文件夹中的音乐文件作为主菜单背景音乐
+      audioManager.loadBGM('main_menu', '../Musics/Faded - Alan Walker&Iselin Solheim.mp3').then(() => {
         audioManager.playBGM('main_menu');
       });
     }
