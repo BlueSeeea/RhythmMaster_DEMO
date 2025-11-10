@@ -116,6 +116,24 @@
     // 移除全局键盘事件监听器
     document.removeEventListener('keydown', handleKeyDown);
     document.removeEventListener('keyup', handleKeyUp);
+    
+    // 清理所有动画定时器，防止内存泄漏
+    if (animationTimers && typeof animationTimers.forEach === 'function') {
+      // Map对象需要正确遍历
+      animationTimers.forEach((timer) => {
+        if (timer) clearInterval(timer);
+      });
+      animationTimers.clear();
+    }
+    
+    // 清理触摸点集合
+    if (activeTouches && typeof activeTouches.clear === 'function') {
+      activeTouches.clear();
+    }
+    
+    // 清空数组引用，帮助垃圾回收
+    notes = [];
+    judgmentDisplay = [];
   });
   
   // 初始化游戏尺寸
@@ -148,7 +166,8 @@
     if (!currentGenerationMode) {
       currentGenerationMode = selectRandomGenerationMode();
       modeActivationTime = now;
-      currentModeDuration = MODE_DURATION_MIN + Math.random() * (MODE_DURATION_MAX - MODE_DURATION_MIN);
+      // 增加模式持续时间，减少频繁切换导致的性能波动
+      currentModeDuration = 8000 + Math.random() * 8000; // 8-16秒，比原来的5-10秒更长
     }
     
     // 生成初始音符 - 增加初始音符数量以支持长时间游戏
@@ -446,43 +465,71 @@
   
   // 游戏主循环 - 进一步优化版本，提高启动流畅度和响应性
   function gameLoop() {
+    // 确保函数不会执行超过一定时间
+    const startTime = performance.now();
+    const MAX_FRAME_TIME = 10; // 限制每帧处理时间，防止主线程阻塞
+    
     if (!isPlaying || isPaused) return;
     
-    const currentTime = performance.now();
-    const deltaTime = currentTime - lastTime;
-    gameTime = currentTime - startTime;
-    
-    // 优化帧率控制，使用requestAnimationFrame的天然帧率控制
-    if (deltaTime >= 16) { // 约60FPS更新频率
-      // 只更新活跃音符，避免不必要的计算
-      updateNotes(deltaTime);
+    try {
+      const currentTime = performance.now();
+      const deltaTime = currentTime - lastTime;
+      gameTime = currentTime - startTime;
       
-      // 检查错过的音符和清理旧音符
-      checkMissedAndCleanupNotes();
-      
-      // 动态生成新音符
-      const activeNotes = notes.filter(note => !note.hit);
-      if (activeNotes.length < 20) {
-        generateAdditionalNotes(currentTime);
+      // 优化帧率控制，使用requestAnimationFrame的天然帧率控制
+      if (deltaTime >= 16) { // 约60FPS更新频率
+        // 检查是否超出最大帧处理时间，如果是则跳过一些非关键更新
+        if (currentTime - startTime < MAX_FRAME_TIME) {
+          // 只更新活跃音符，避免不必要的计算
+          updateNotes(deltaTime);
+        }
+        
+        // 检查是否还有时间执行下一个任务
+        if (currentTime - startTime < MAX_FRAME_TIME) {
+          // 检查错过的音符和清理旧音符
+          checkMissedAndCleanupNotes();
+        }
+        
+        // 检查是否还有时间执行下一个任务
+        if (currentTime - startTime < MAX_FRAME_TIME) {
+          // 动态生成新音符 - 改进版本，减少不必要的数组过滤
+          const activeNotesCount = notes.reduce((count, note) => count + (!note.hit ? 1 : 0), 0);
+          if (activeNotesCount < 20) {
+            generateAdditionalNotes(currentTime);
+          }
+        }
+        
+        // 统一更新所有判定显示的动画，避免定时器累积
+        if (currentTime - startTime < MAX_FRAME_TIME) {
+          updateJudgmentAnimations();
+        }
+        
+        // 降低状态更新频率，减少响应式开销，提高性能
+        if (currentTime - lastStatusUpdate >= 200) { // 每200ms更新一次状态
+          updateGameStatus();
+          lastStatusUpdate = currentTime;
+        }
+        
+        // 检查游戏是否结束
+        if (gameTime >= gameDuration * 1000) {
+          endGame();
+          return;
+        }
+        
+        lastTime = currentTime;
       }
       
-      // 降低状态更新频率，减少响应式开销，提高性能
-      if (currentTime - lastStatusUpdate >= 200) { // 每200ms更新一次状态
-        updateGameStatus();
-        lastStatusUpdate = currentTime;
+      // 安全请求下一帧，确保不会堆积
+      if (isPlaying && !isPaused) {
+        animationFrameId = requestAnimationFrame(gameLoop);
       }
-      
-      // 检查游戏是否结束
-      if (gameTime >= gameDuration * 1000) {
-        endGame();
-        return;
+    } catch (error) {
+      console.error('游戏循环错误:', error);
+      // 即使出错也继续请求下一帧，避免游戏完全卡死
+      if (isPlaying && !isPaused) {
+        animationFrameId = requestAnimationFrame(gameLoop);
       }
-      
-      lastTime = currentTime;
     }
-    
-    // 请求下一帧，确保流畅的动画
-    animationFrameId = requestAnimationFrame(gameLoop);
   }
   
   let lastStatusUpdate = 0; // 用于限制状态更新频率
@@ -684,8 +731,9 @@
     if (!currentGenerationMode || currentTime - modeActivationTime > currentModeDuration) {
       currentGenerationMode = selectRandomGenerationMode();
       modeActivationTime = currentTime;
-      currentModeDuration = MODE_DURATION_MIN + Math.random() * (MODE_DURATION_MAX - MODE_DURATION_MIN);
-      console.log(`切换到生成模式: ${currentGenerationMode.name}`);
+      // 增加模式持续时间，减少频繁切换导致的性能波动
+      currentModeDuration = 8000 + Math.random() * 8000; // 8-16秒，比原来的5-10秒更长
+      // 移除console.log以减少性能开销
     }
     
     // 确保同一轨道上的音符数量限制
@@ -787,39 +835,67 @@
   
   // 处理音符点击 - 统一的判定逻辑
   function handleNoteHit(lane) {
-    if (!isPlaying || isPaused || !gameArea) return;
-    
-    // 找到该轨道上未击中且在合理范围内的音符
-    const currentTime = Date.now();
-    const laneNotes = notes.filter(
-      note => note.lane === lane && note.createdAt && !note.hit && 
-             currentTime >= note.createdAt && // 只考虑已经创建的音符
-             Math.abs(note.position - judgmentLinePosition) < hitRange // 只考虑在判定范围内的音符
-    );
-    
-    if (laneNotes.length === 0) {
-      // 如果没有可击中的音符，不做处理，避免错误的miss判定
+    // 添加防御性检查
+    if (!isPlaying || isPaused || !gameArea || lane === undefined || lane === null || lane < 0 || lane >= laneCount) {
       return;
     }
     
-    // 按位置排序，找到最接近判定线的音符
-    laneNotes.sort((a, b) => 
-      Math.abs(a.position - judgmentLinePosition) - 
-      Math.abs(b.position - judgmentLinePosition)
-    );
-    const targetNote = laneNotes[0];
-    
-    const distance = Math.abs(targetNote.position - judgmentLinePosition);
-    
-    // 改进的判定逻辑，确保在范围内的音符都能得到正确判定
-    const judgment = calculateJudgment(distance);
-    registerHit(targetNote, judgment);
-    
-    // 播放击中音效
-    if (audioManager && gameConfig.sfxEnabled) {
-      // 根据判定类型播放不同音效
-      const soundName = judgment === 'miss' ? 'miss' : `hit_${judgment}`;
-      audioManager.playSoundEffect(soundName);
+    try {
+      // 找到该轨道上未击中且在合理范围内的音符
+      const currentTime = Date.now();
+      
+      // 优化过滤逻辑：先过滤必要条件，减少计算量
+      const laneNotes = notes.filter(
+        note => 
+          note && // 确保note不是null或undefined
+          note.lane === lane && 
+          !note.hit && 
+          note.createdAt && currentTime >= note.createdAt 
+      );
+      
+      if (laneNotes.length === 0) {
+        return;
+      }
+      
+      // 只对候选音符计算距离并找到最接近的
+      let minDistance = Infinity;
+      let targetNote = null;
+      
+      for (const note of laneNotes) {
+        const distance = Math.abs(note.position - judgmentLinePosition);
+        if (distance < hitRange && distance < minDistance) {
+          minDistance = distance;
+          targetNote = note;
+        }
+      }
+      
+      if (!targetNote) {
+        return; // 没有找到在判定范围内的音符
+      }
+      
+      // 立即标记为已击中，防止重复处理
+      targetNote.hit = true;
+      
+      // 计算判定结果
+      const judgment = calculateJudgment(minDistance);
+      
+      // 异步处理分数更新和判定显示，避免阻塞主线程
+      setTimeout(() => {
+        registerHit(targetNote, judgment);
+        
+        // 异步播放音效，避免阻塞
+        if (audioManager && gameConfig.sfxEnabled) {
+          try {
+            const soundName = judgment === 'miss' ? 'miss' : `hit_${judgment}`;
+            audioManager.playSoundEffect(soundName);
+          } catch (soundError) {
+            // 音效播放失败不应影响游戏流程
+            console.warn('音效播放失败:', soundError);
+          }
+        }
+      }, 0);
+    } catch (error) {
+      console.error('处理音符击中时出错:', error);
     }
   }
   
@@ -884,6 +960,7 @@
   
   // 显示判定结果 - 使用响应式数组而不是直接DOM操作
   let judgmentDisplay = [];
+  let animationTimers = new Map(); // 用于跟踪所有动画定时器
   
   function showJudgment(judgment, lane) {
     if (!gameArea) return;
@@ -902,30 +979,35 @@
            judgment === 'great' ? 'GREAT!' :
            judgment === 'good' ? 'GOOD' :
            judgment === 'bad' ? 'BAD' : 'MISS',
-      opacity: 1
+      opacity: 1,
+      createdAt: performance.now()
     });
     
-    // 使用requestAnimationFrame执行动画，避免阻塞主线程
-    requestAnimationFrame(() => {
-      // 淡入淡出动画
-      let opacity = 1;
-      const fadeInterval = setInterval(() => {
-        opacity -= 0.1;
-        
-        const index = judgmentDisplay.findIndex(j => j.id === judgmentId);
-        if (index !== -1) {
-          judgmentDisplay[index].opacity = opacity;
-          
-          if (opacity <= 0) {
-            // 一次性移除，减少响应式更新次数
-            judgmentDisplay = judgmentDisplay.filter(j => j.id !== judgmentId);
-            clearInterval(fadeInterval);
-          }
-        } else {
-          clearInterval(fadeInterval);
-        }
-      }, 60);
-    });
+    // 立即返回，不在这里启动动画
+  }
+  
+  // 在游戏循环中统一更新所有判定显示的动画
+  function updateJudgmentAnimations() {
+    const currentTime = performance.now();
+    const newDisplayList = [];
+    
+    for (const judgment of judgmentDisplay) {
+      const age = currentTime - judgment.createdAt;
+      const animationDuration = 600; // 总动画时间600ms
+      
+      if (age < animationDuration) {
+        // 计算当前透明度 - 线性衰减
+        judgment.opacity = 1 - (age / animationDuration);
+        // 添加到新数组
+        newDisplayList.push(judgment);
+      }
+      // 超过动画时间的自动被过滤掉，无需额外清理
+    }
+    
+    // 只在数组变化时更新，减少响应式更新次数
+    if (newDisplayList.length !== judgmentDisplay.length) {
+      judgmentDisplay = newDisplayList;
+    }
   }
   
   // 更新游戏状态
@@ -1081,43 +1163,87 @@
   
   // 处理触摸开始事件，支持多点触控
   function handleTouchStart(event, laneIndex) {
-    if (!isPlaying || isPaused) return;
+    // 添加防御性检查
+    if (!event || !isPlaying || isPaused) return;
     
-    // 阻止事件冒泡和默认行为
-    event.preventDefault();
-    event.stopPropagation();
-    
-    // 为每个触摸点单独处理
-    const touches = event.touches || [event];
-    for (let i = 0; i < touches.length; i++) {
-      const touch = touches[i];
-      const touchId = touch.identifier !== undefined ? touch.identifier : Math.random();
+    try {
+      // 阻止事件冒泡和默认行为
+      event.preventDefault();
+      event.stopPropagation();
       
-      // 只处理新的触摸点
-      if (!activeTouches.has(touchId)) {
-        activeTouches.add(touchId);
-        handleNoteHit(laneIndex);
+      // 为每个触摸点单独处理
+      const touches = event.touches || [event];
+      // 限制处理的触摸点数，避免性能问题
+      const limitedTouches = Array.from(touches).slice(0, 5);
+      
+      for (let i = 0; i < limitedTouches.length; i++) {
+        const touch = limitedTouches[i];
+        if (!touch) continue;
         
-        // 触发触摸反馈动画
-        const touchElement = event.currentTarget;
-        const feedback = touchElement.querySelector('.touch-feedback');
-        if (feedback) {
-          feedback.style.opacity = '0.3';
+        const touchId = touch.identifier !== undefined ? touch.identifier : Math.random();
+        
+        // 只处理新的触摸点
+        if (activeTouches && !activeTouches.has(touchId)) {
+          activeTouches.add(touchId);
+          // 异步处理音符击中，避免阻塞主线程
           setTimeout(() => {
-            feedback.style.opacity = '0';
-          }, 200);
+            handleNoteHit(laneIndex);
+          }, 0);
+          
+          // 简化触摸反馈，避免复杂DOM操作
+          const touchElement = event.currentTarget;
+          if (touchElement && touchElement.classList && touchElement.classList.contains('touch-area')) {
+            touchElement.classList.add('touching');
+            setTimeout(() => {
+              if (touchElement && touchElement.classList) {
+                touchElement.classList.remove('touching');
+              }
+            }, 200);
+          }
         }
       }
+    } catch (error) {
+      console.error('触摸事件处理错误:', error);
     }
   }
   
   // 处理触摸结束事件，清理活动触摸点
   function handleTouchEnd(event) {
-    const changedTouches = event.changedTouches || [event];
-    for (let i = 0; i < changedTouches.length; i++) {
-      const touchId = changedTouches[i].identifier !== undefined ? 
-                      changedTouches[i].identifier : Math.random();
-      activeTouches.delete(touchId);
+    // 添加防御性检查
+    if (!event || !activeTouches) return;
+    
+    try {
+      // 阻止事件冒泡和默认行为
+      event.preventDefault();
+      event.stopPropagation();
+      
+      const changedTouches = event.changedTouches || [event];
+      if (!changedTouches || !Array.isArray(changedTouches)) return;
+      
+      // 限制处理的触摸点数，避免性能问题
+      const limitedTouches = Array.from(changedTouches).slice(0, 5);
+      
+      for (let i = 0; i < limitedTouches.length; i++) {
+        const touch = limitedTouches[i];
+        if (!touch) continue;
+        
+        const touchId = touch.identifier !== undefined ? 
+                        touch.identifier : Math.random();
+        
+        // 安全删除触摸点
+        if (activeTouches.delete && typeof activeTouches.delete === 'function') {
+          activeTouches.delete(touchId);
+        }
+      }
+      
+      // 额外的安全检查：如果活动触摸点过多，清理一部分
+      if (activeTouches.size && activeTouches.size > 10) {
+        // 只保留最新的5个触摸点
+        const oldestTouches = Array.from(activeTouches).slice(0, activeTouches.size - 5);
+        oldestTouches.forEach(touchId => activeTouches.delete(touchId));
+      }
+    } catch (error) {
+      console.error('触摸结束事件处理错误:', error);
     }
   }
   
@@ -1125,8 +1251,6 @@
   function handleKeyUp(event) {
     // 可以在这里添加键盘松开时的逻辑
   }
-  
-  // 移除重复的gameLoop函数声明，优化已在原始函数中应用
   
   // 获取当前游戏时间格式
   function getFormattedTime(time) {
