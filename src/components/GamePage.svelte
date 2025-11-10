@@ -466,7 +466,7 @@
   // 游戏主循环 - 进一步优化版本，提高启动流畅度和响应性
   function gameLoop() {
     // 确保函数不会执行超过一定时间
-    const startTime = performance.now();
+    const frameStartTime = performance.now();
     const MAX_FRAME_TIME = 10; // 限制每帧处理时间，防止主线程阻塞
     
     if (!isPlaying || isPaused) return;
@@ -479,19 +479,19 @@
       // 优化帧率控制，使用requestAnimationFrame的天然帧率控制
       if (deltaTime >= 16) { // 约60FPS更新频率
         // 检查是否超出最大帧处理时间，如果是则跳过一些非关键更新
-        if (currentTime - startTime < MAX_FRAME_TIME) {
+        if (currentTime - frameStartTime < MAX_FRAME_TIME) {
           // 只更新活跃音符，避免不必要的计算
           updateNotes(deltaTime);
         }
         
         // 检查是否还有时间执行下一个任务
-        if (currentTime - startTime < MAX_FRAME_TIME) {
+        if (currentTime - frameStartTime < MAX_FRAME_TIME) {
           // 检查错过的音符和清理旧音符
           checkMissedAndCleanupNotes();
         }
         
         // 检查是否还有时间执行下一个任务
-        if (currentTime - startTime < MAX_FRAME_TIME) {
+        if (currentTime - frameStartTime < MAX_FRAME_TIME) {
           // 动态生成新音符 - 改进版本，减少不必要的数组过滤
           const activeNotesCount = notes.reduce((count, note) => count + (!note.hit ? 1 : 0), 0);
           if (activeNotesCount < 20) {
@@ -500,7 +500,7 @@
         }
         
         // 统一更新所有判定显示的动画，避免定时器累积
-        if (currentTime - startTime < MAX_FRAME_TIME) {
+        if (currentTime - frameStartTime < MAX_FRAME_TIME) {
           updateJudgmentAnimations();
         }
         
